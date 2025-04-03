@@ -8,9 +8,8 @@ async function bootstrap() {
     // origin: 'https://pos-ui-production.up.railway.app', // Cambia esta línea para permitir solo tu frontend
     // origin: 'http://localhost:5173', // Cambia esta línea para permitir solo tu frontend
     credentials: true,
-    // origin: '*',
+    origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
   });
 
   await app.listen(port || 3000);
