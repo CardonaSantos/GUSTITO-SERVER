@@ -40,9 +40,12 @@ export class VentaController {
     return await this.ventaService.findAllSaleSucursal(id);
   }
 
-  @Get('/get-ventas-caja/:id')
-  async getSalesToCashRegist(@Param('id', ParseIntPipe) id: number) {
-    return await this.ventaService.getSalesToCashRegist(id);
+  @Get('/get-ventas-caja/:id/:usuarioId')
+  async getSalesToCashRegist(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('usuarioId', ParseIntPipe) usuarioId: number,
+  ) {
+    return await this.ventaService.getSalesToCashRegist(id, usuarioId);
   }
 
   @Get('/get-sale/:id')

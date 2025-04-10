@@ -14,6 +14,10 @@ export class CreateVentaDto {
   @IsOptional()
   clienteId?: number; // Si es un cliente existente
 
+  @IsNumber()
+  @IsOptional()
+  usuarioId?: number; // Si es un cliente existente
+
   @IsString()
   @IsOptional()
   nombre?: string;

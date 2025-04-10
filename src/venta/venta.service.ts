@@ -249,6 +249,7 @@ export class VentaService {
       direccion,
       imei,
       iPInternet,
+      usuarioId,
     } = createVentaDto;
 
     console.log(
@@ -273,10 +274,8 @@ export class VentaService {
         // 1. Crear o asociar cliente
         let cliente;
         if (clienteId) {
-          // Cliente ya existe
           cliente = { connect: { id: clienteId } };
         } else if (nombre && telefono) {
-          // Crear cliente nuevo
           const nuevoCliente = await prisma.cliente.create({
             data: {
               nombre,
@@ -287,14 +286,9 @@ export class VentaService {
             },
           });
           cliente = { connect: { id: nuevoCliente.id } };
-
-          console.log('EL NUEVO CLIENTE CREADO ES: ', nuevoCliente);
         } else {
-          // Caso de cliente final (CF)
           cliente = undefined;
         }
-
-        console.log('El nuevo cliente es: ', cliente);
 
         // 2. Validación de productos y precios
         const productosConsolidados = await Promise.all(
@@ -375,16 +369,6 @@ export class VentaService {
           }
         }
 
-        // 5. Actualizar stock
-        // await prisma.$transaction(
-        //   stockUpdates.map((stock) =>
-        //     prisma.stock.update({
-        //       where: { id: stock.id },
-        //       data: { cantidad: stock.cantidad },
-        //     }),
-        //   ),
-        // );
-
         // 5. Actualizar stock dentro de la transacción principal
         await Promise.all(
           stockUpdates.map((stock) =>
@@ -404,6 +388,7 @@ export class VentaService {
         // 7. Crear la venta con cliente y opción de IMEI
         const venta = await prisma.venta.create({
           data: {
+            usuario: { connect: { id: usuarioId } },
             cliente,
             horaVenta: new Date(),
             totalVenta,
@@ -581,7 +566,7 @@ export class VentaService {
     }
   }
 
-  async getSalesToCashRegist(sucursalId: number) {
+  async getSalesToCashRegist(sucursalId: number, usuarioId: number) {
     try {
       const salesWithoutCashRegist = await this.prisma.venta.findMany({
         orderBy: {
@@ -590,6 +575,7 @@ export class VentaService {
         where: {
           sucursalId: sucursalId,
           registroCajaId: null,
+          usuarioId: usuarioId,
         },
         include: {
           productos: {

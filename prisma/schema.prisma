@@ -576,6 +576,8 @@ model Usuario {
   Egreso Egreso[]
   fecha_creacion        DateTime           @default(now()) // Aplica un valor por defecto a filas nuevas y existentes
   fecha_actualizacion DateTime @default(now()) // Esto asigna automáticamente la fecha actual.
+
+  ventas             Venta[]            // Ventas realizadas por el usuario
   VentaEliminada VentaEliminada[]
 
   VentaCuota VentaCuota[]
@@ -787,6 +789,9 @@ model Venta {
   registroCaja      RegistroCaja? @relation(fields: [registroCajaId], references: [id], onDelete: SetNull)
   // Relación opcional con una VentaCuota
   ventaCuota          VentaCuota?
+  //relacion con venta opcional
+  usuarioId           Int?         // Relación con el usuario que realizó la venta
+  usuario             Usuario?     @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
 }
 
 model TransferenciaProducto {
