@@ -37,6 +37,7 @@ import { RepairModule } from './repair/repair.module';
 import { MetasModule } from './metas/metas.module';
 // import { EmpresaModule } from './crm/empresa/empresa.module';
 import { EmpresaModule } from './CRM/empresa/empresa.module';
+import { EmpaqueModule } from './empaque/empaque.module';
 
 @Module({
   imports: [
@@ -78,6 +79,7 @@ import { EmpresaModule } from './CRM/empresa/empresa.module';
     RepairModule,
     MetasModule,
     EmpresaModule,
+    EmpaqueModule,
   ],
   controllers: [AppController],
   providers: [AppService],

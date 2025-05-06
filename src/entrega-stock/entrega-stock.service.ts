@@ -148,7 +148,7 @@ export class EntregaStockService {
     try {
       const deliveryStocks = await this.prisma.entregaStock.findMany({
         where: {
-          sucursalId: sucursalId, // Filtrar por sucursal
+          sucursalId: sucursalId,
         },
         include: {
           proveedor: {
@@ -169,6 +169,12 @@ export class EntregaStockService {
           stockEntregado: {
             include: {
               producto: {
+                select: {
+                  nombre: true,
+                  codigoProducto: true,
+                },
+              },
+              empaque: {
                 select: {
                   nombre: true,
                   codigoProducto: true,
@@ -195,7 +201,28 @@ export class EntregaStockService {
         },
       });
 
-      return deliveryStocks;
+      // 🔁 Transformar estructura para facilitar uso en el frontend
+      const formatted = deliveryStocks.map((entrega) => ({
+        ...entrega,
+        stockEntregado: entrega.stockEntregado.map((item) => {
+          const tipoItem = item.producto
+            ? 'producto'
+            : item.empaque
+              ? 'empaque'
+              : 'desconocido';
+
+          const detalleItem = item.producto ||
+            item.empaque || { nombre: 'Desconocido' };
+
+          return {
+            ...item,
+            tipoItem,
+            detalleItem,
+          };
+        }),
+      }));
+
+      return formatted;
     } catch (error) {
       console.error(error);
       throw new InternalServerErrorException(

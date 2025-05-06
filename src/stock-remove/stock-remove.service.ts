@@ -31,6 +31,14 @@ export class StockRemoveService {
               codigoProducto: true,
             },
           },
+          empaque: {
+            select: {
+              id: true,
+              nombre: true,
+              descripcion: true,
+              codigoProducto: true,
+            },
+          },
           usuario: {
             select: {
               id: true,
@@ -50,11 +58,17 @@ export class StockRemoveService {
         },
       });
 
-      if (!regists) {
-        throw new NotFoundException('No se pudieron encontrar los registros');
-      }
+      const formatted = regists.map((entry) => ({
+        id: entry.id,
+        fechaHora: entry.fechaHora,
+        motivo: entry.motivo,
+        tipo: entry.producto ? 'producto' : 'empaque',
+        item: entry.producto ?? entry.empaque,
+        usuario: entry.usuario,
+        sucursal: entry.sucursal,
+      }));
 
-      return regists;
+      return formatted;
     } catch (error) {
       console.log(error);
       throw new InternalServerErrorException(

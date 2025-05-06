@@ -351,23 +351,21 @@ model Producto {
   HistorialStock HistorialStock[]
   HistorialPrecio HistorialPrecio[]
   TransferenciaProducto TransferenciaProducto[]
-  //NUEVOS PRECIOS
+
   precios           PrecioProducto[] // Relación con múltiples precios
   SolicitudPrecio SolicitudPrecio[]
-  //NUEVA SOLICITUD TRANSFERENCIA
+
   solicitudesTransferencia SolicitudTransferenciaProducto[]
-  //NUEVO PRECIO COSTO PRODUCTO
+
   precioCostoActual Float?
-  // Historial de precios de costo
+
   HistorialPrecioCosto HistorialPrecioCosto[]
 
-  //AJUSTE
   AjusteStock AjusteStock[]
 
   EliminacionProducto EliminacionProducto[]
 
   EliminacionStock EliminacionStock[]
-  //PARA USARLO EN GARANTÍAS
   Garantia Garantia[]
 
   RegistroGarantia RegistroGarantia[]
@@ -375,6 +373,22 @@ model Producto {
   VentaEliminadaProducto VentaEliminadaProducto[]
 
   Reparacion Reparacion[]
+}
+
+model Empaque {
+  id               Int       @id @default(autoincrement())
+  nombre           String
+  descripcion      String
+  codigoProducto   String    @unique
+  creadoEn         DateTime  @default(now())
+  actualizadoEn    DateTime  @updatedAt
+  precioCosto      Float?
+  precioVenta      Float?              
+  // Relaciones similares al producto
+  stock            Stock[]             // Stock por sucursal
+  HistorialStock   HistorialStock[]    // Control de movimientos
+  AjusteStock      AjusteStock[]       // Ajustes aplicados
+  EliminacionStock EliminacionStock[]
 }
 
 
@@ -416,32 +430,43 @@ model HistorialPrecio {
 
 //=======================>
 model AjusteStock {
-  id               Int      @id @default(autoincrement())
-  producto         Producto @relation(fields: [productoId], references: [id])
-  productoId       Int
-  stock            Stock?   @relation(fields: [stockId], references: [id]) // Relación opcional al stock
-  stockId          Int?     // Campo opcional para identificar el stock modificado
+  id               Int       @id @default(autoincrement())
+
+  productoId       Int?      // Opcional
+  producto         Producto? @relation(fields: [productoId], references: [id])
+  empaqueId        Int?      // Opcional
+  empaque          Empaque?  @relation(fields: [empaqueId], references: [id])
+
+  stockId          Int?      
+  stock            Stock?    @relation(fields: [stockId], references: [id])
   cantidadAjustada Int
   tipoAjuste       TipoAjuste
-  fechaHora        DateTime @default(now())
-  usuario          Usuario?  @relation(fields: [usuarioId], references: [id])
+  fechaHora        DateTime   @default(now())
+
   usuarioId        Int?
-  descripcion      String?  // Campo opcional para el motivo del ajuste
+  usuario          Usuario?   @relation(fields: [usuarioId], references: [id])
+  descripcion      String?
 }
 
 
 model EliminacionStock {
   id           Int       @id @default(autoincrement())
-  producto     Producto  @relation(fields: [productoId], references: [id])
-  
-  productoId   Int       // Producto asociado al stock eliminado
+
+  productoId   Int?
+  producto     Producto? @relation(fields: [productoId], references: [id])
+
+  empaqueId    Int?
+  empaque      Empaque?  @relation(fields: [empaqueId], references: [id])
   fechaHora    DateTime  @default(now())
+
+  usuarioId    Int?
   usuario      Usuario?  @relation(fields: [usuarioId], references: [id])
-  usuarioId    Int?      // Usuario que realizó la eliminación
-  sucursal     Sucursal?  @relation(fields: [sucursalId], references: [id])
-  sucursalId   Int?       // Sucursal donde se eliminó el stock
-  motivo       String?   // Razón de la eliminación (opcional)
+
+  sucursalId   Int?
+  sucursal     Sucursal? @relation(fields: [sucursalId], references: [id])
+  motivo       String?
 }
+
 // Enum para tipo de ajuste
 enum TipoAjuste {
   INCREMENTO
@@ -470,28 +495,31 @@ model EliminacionCliente {
 }
 
 model Stock {
-  id              Int         @id @default(autoincrement())
-  productoId      Int
-  cantidad        Int
-  costoTotal      Float        // Costo total de adquisición de todos los productos en stock
-  creadoEn        DateTime     @default(now())
-  fechaIngreso    DateTime
-  fechaVencimiento DateTime?   // Fecha de vencimiento asociada al lote de productos
-  precioCosto     Float        // Precio al que se compró el producto en ese lote
-  producto        Producto     @relation(fields: [productoId], references: [id], onDelete: Cascade)
-  entregaStockId  Int?         // Puede ser nulo si no está relacionado con una entrega específica
-  entregaStock    EntregaStock? @relation(fields: [entregaStockId], references: [id], onDelete: SetNull)
-  //OTROS
-  sucursal        Sucursal     @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
-  sucursalId      Int          // NUEVO: Relación con la sucursal
+  id                Int         @id @default(autoincrement())
+  productoId        Int?        // OPCIONAL
+  producto          Producto?   @relation(fields: [productoId], references: [id], onDelete: Cascade)
 
+  empaqueId         Int?        // OPCIONAL
+  empaque           Empaque?    @relation(fields: [empaqueId], references: [id], onDelete: Cascade)
 
-  Vencimiento Vencimiento[]
+  cantidad          Int
+  costoTotal        Float
+  creadoEn          DateTime     @default(now())
+  fechaIngreso      DateTime
+  fechaVencimiento  DateTime?
+  precioCosto       Float
 
-  //AJUSTES DE STOCKS
-  AjusteStock AjusteStock[]
+  sucursalId        Int
+  sucursal          Sucursal     @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
 
+  entregaStockId    Int?
+  entregaStock      EntregaStock? @relation(fields: [entregaStockId], references: [id], onDelete: SetNull)
+
+  Vencimiento       Vencimiento[]
+
+  AjusteStock       AjusteStock[]
 }
+
 
 model Sucursal {
   id              Int         @id @default(autoincrement())
@@ -760,14 +788,20 @@ model Pago {
   fechaPago       DateTime  @default(now())
 }
 
+
 model HistorialStock {
-  id              Int         @id @default(autoincrement())
-  productoId      Int
-  cantidadAnterior Int
-  cantidadNueva   Int
-  fechaCambio     DateTime    @default(now())
-  producto        Producto    @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  id                Int       @id @default(autoincrement())
+  productoId        Int?      // opcional
+  producto          Producto? @relation(fields: [productoId], references: [id], onDelete: Cascade)
+
+  empaqueId         Int?      // opcional
+  empaque           Empaque?  @relation(fields: [empaqueId], references: [id], onDelete: Cascade)
+
+  cantidadAnterior  Int
+  cantidadNueva     Int
+  fechaCambio       DateTime  @default(now())
 }
+
 
 model Venta {
   id              Int         @id @default(autoincrement())

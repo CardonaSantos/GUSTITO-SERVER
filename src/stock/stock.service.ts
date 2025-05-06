@@ -10,6 +10,8 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateEntregaStockDto } from 'src/entrega-stock/dto/create-entrega-stock.dto';
 import { AjusteStockService } from 'src/ajuste-stock/ajuste-stock.service';
 import { DeleteStockDto } from './dto/delete-stock.dto';
+import { CreateEmpaqueStockDto } from './dto/create-empaque-stock.dto';
+import { DeleteEmpaqueStockDto } from './dto/delete-stockEmpaque.dto';
 @Injectable()
 export class StockService {
   //
@@ -77,6 +79,65 @@ export class StockService {
     }
   }
 
+  async createEmpaqueStock(createStockDto: CreateEmpaqueStockDto) {
+    try {
+      const { proveedorId, stockEntries, sucursalId, recibidoPorId } =
+        createStockDto;
+
+      console.log('Recibido para empaques:', {
+        proveedorId,
+        stockEntries,
+        sucursalId,
+        recibidoPorId,
+      });
+
+      // Calcular el costo total
+      const costoTotalEntrega = stockEntries.reduce(
+        (total, entry) => total + entry.cantidad * entry.precioCosto,
+        0,
+      );
+
+      // Crear el registro de entrega de stock
+      const newEntrega = await this.prisma.entregaStock.create({
+        data: {
+          proveedorId,
+          montoTotal: costoTotalEntrega,
+          recibidoPorId,
+          sucursalId,
+        },
+      });
+
+      console.log('Entrega registrada:', newEntrega);
+
+      // Registrar cada entrada de stock para empaque
+      for (const entry of stockEntries) {
+        const newStock = await this.prisma.stock.create({
+          data: {
+            empaqueId: entry.empaqueId, // <- importante
+            cantidad: entry.cantidad,
+            costoTotal: entry.cantidad * entry.precioCosto,
+            fechaIngreso: new Date(entry.fechaIngreso),
+            fechaVencimiento: entry.fechaVencimiento
+              ? new Date(entry.fechaVencimiento)
+              : null,
+            precioCosto: entry.precioCosto,
+            entregaStockId: newEntrega.id,
+            sucursalId,
+          },
+        });
+
+        console.log('Stock registrado para empaque:', newStock);
+      }
+
+      return newEntrega;
+    } catch (error) {
+      console.error('Error al registrar stock de empaques:', error);
+      throw new InternalServerErrorException(
+        'Error al registrar stock de empaques',
+      );
+    }
+  }
+
   async findAll() {
     try {
       const stocks = await this.prisma.stock.findMany({});
@@ -125,53 +186,46 @@ export class StockService {
     }
   }
 
-  // async deleteOneStock(dto: DeleteStockDto) {
-  //   try {
-  //     // Obtener los datos del stock antes de eliminarlo
-  //     const stockToDelete = await this.prisma.stock.findUnique({
-  //       where: {
-  //         id: dto.stockId,
-  //       },
-  //       include: {
-  //         producto: true,
-  //         sucursal: true,
-  //       },
-  //     });
+  async findOneStockEmpaqueEdti(id: number) {
+    try {
+      const stock = await this.prisma.stock.findUnique({
+        where: { id },
+        include: {
+          empaque: {
+            select: {
+              nombre: true,
+              id: true,
+            },
+          },
+        },
+      });
+      if (!stock) {
+        throw new NotFoundException(`Stock con ID ${id} no encontrado`);
+      }
 
-  //     if (!stockToDelete) {
-  //       throw new BadRequestException('Stock no encontrado');
-  //     }
+      const formattStock = {
+        id: stock.id,
+        empaqueId: stock.empaqueId,
+        cantidad: stock.cantidad,
+        costoTotal: stock.costoTotal,
+        creadoEn: stock.creadoEn,
+        fechaIngreso: stock.fechaIngreso,
+        fechaVencimiento: stock.fechaVencimiento || null,
+        precioCosto: stock.precioCosto,
+        entregaStockId: stock.entregaStockId,
+        sucursalId: stock.sucursalId,
+        empaque: {
+          id: stock.empaque.id,
+          nombre: stock.empaque.nombre,
+        },
+      };
 
-  //     // Eliminar el stock
-  //     await this.prisma.stock.delete({
-  //       where: {
-  //         id: dto.stockId,
-  //       },
-  //     });
-
-  //     // Crear el registro en EliminacionStock
-  //     const registroEliminacionStock =
-  //       await this.prisma.eliminacionStock.create({
-  //         data: {
-  //           stockId: dto.stockId,
-  //           productoId: dto.productoId,
-  //           sucursalId: dto.sucursalId,
-  //           usuarioId: dto.usuarioId,
-  //           fechaHora: new Date(),
-  //           motivo: dto.motivo || 'Sin motivo especificado',
-  //         },
-  //       });
-
-  //     console.log('El nuevo registro es: ', registroEliminacionStock);
-
-  //     return registroEliminacionStock;
-  //   } catch (error) {
-  //     console.error(error);
-  //     throw new BadRequestException(
-  //       'Error al eliminar el stock y registrar la eliminación',
-  //     );
-  //   }
-  // }
+      return formattStock;
+    } catch (error) {
+      console.error(error);
+      throw new InternalServerErrorException('Error al encontrar el stock');
+    }
+  }
 
   async deleteOneStock(dto: DeleteStockDto) {
     try {
@@ -192,6 +246,44 @@ export class StockService {
             productoId: dto.productoId,
             sucursalId: dto.sucursalId,
             usuarioId: dto.usuarioId,
+            fechaHora: new Date(),
+            motivo: dto.motivo || 'Sin motivo especificado',
+          },
+        });
+
+      // Eliminar el stock
+      await this.prisma.stock.delete({
+        where: { id: dto.stockId },
+      });
+
+      return registroEliminacionStock;
+    } catch (error) {
+      console.error(error);
+      throw new BadRequestException(
+        'Error al eliminar el stock y registrar la eliminación',
+      );
+    }
+  }
+
+  async deleteOneEmpaqueStock(dto: DeleteEmpaqueStockDto) {
+    try {
+      // Obtener el stock antes de eliminarlo
+      const stockToDelete = await this.prisma.stock.findUnique({
+        where: { id: dto.stockId },
+      });
+
+      if (!stockToDelete) {
+        throw new BadRequestException('Stock no encontrado');
+      }
+
+      // Crear el registro en EliminacionStock
+      const registroEliminacionStock =
+        await this.prisma.eliminacionStock.create({
+          data: {
+            // productoId: dto.productoId ?? undefined,
+            empaqueId: dto.empaqueId ?? undefined,
+            sucursalId: dto.sucursalId ?? undefined,
+            usuarioId: dto.usuarioId ?? undefined,
             fechaHora: new Date(),
             motivo: dto.motivo || 'Sin motivo especificado',
           },

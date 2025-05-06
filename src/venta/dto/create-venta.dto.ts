@@ -12,11 +12,11 @@ import {
 export class CreateVentaDto {
   @IsNumber()
   @IsOptional()
-  clienteId?: number; // Si es un cliente existente
+  clienteId?: number;
 
   @IsNumber()
   @IsOptional()
-  usuarioId?: number; // Si es un cliente existente
+  usuarioId?: number;
 
   @IsString()
   @IsOptional()
@@ -45,6 +45,13 @@ export class CreateVentaDto {
     selectedPriceId: number;
   }>;
 
+  @IsArray()
+  @IsOptional()
+  empaques?: Array<{
+    id: number;
+    quantity: number;
+  }>;
+
   @IsEnum(MetodoPago)
   metodoPago: MetodoPago;
 
@@ -56,5 +63,5 @@ export class CreateVentaDto {
 
   @IsString()
   @IsOptional()
-  imei?: string; // Campo opcional para IMEI
+  imei?: string;
 }
