@@ -7,6 +7,12 @@ import { CreateAnalyticsDto } from './dto/create-analytics.dto';
 import { UpdateAnalyticsDto } from './dto/update-analytics.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 
+import * as dayjs from 'dayjs';
+import * as utc from 'dayjs/plugin/utc';
+import * as tz from 'dayjs/plugin/timezone';
+dayjs.extend(utc);
+dayjs.extend(tz);
+
 @Injectable()
 export class AnalyticsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -276,58 +282,6 @@ export class AnalyticsService {
     }
   }
 
-  // async getVentasDiaII(idSucursal: number) {
-  //   try {
-  //     // Get the current date
-  //     const now = new Date();
-
-  //     // Build the start and end of the day (local time)
-  //     const startOfDay = new Date(
-  //       now.getFullYear(),
-  //       now.getMonth(),
-  //       now.getDate(),
-  //       0,
-  //       0,
-  //       0,
-  //     );
-  //     const endOfDay = new Date(
-  //       now.getFullYear(),
-  //       now.getMonth(),
-  //       now.getDate(),
-  //       23,
-  //       59,
-  //       59,
-  //     );
-
-  //     // Retrieve all sales that fall within today’s date range for the given sucursal
-  //     const ventasDeHoy = await this.prisma.venta.findMany({
-  //       where: {
-  //         sucursalId: idSucursal,
-  //         fechaVenta: {
-  //           gte: startOfDay,
-  //           lte: endOfDay,
-  //         },
-  //       },
-  //     });
-
-  //     // Sum up all totalVenta
-  //     const totalDeHoy = ventasDeHoy.reduce(
-  //       (acc, venta) => acc + venta.totalVenta,
-  //       0,
-  //     );
-
-  //     console.log(
-  //       `Total de ventas para la sucursal ${idSucursal} hoy: `,
-  //       totalDeHoy,
-  //     );
-  //     return totalDeHoy;
-  //   } catch (error) {
-  //     console.error('Error al obtener el total de ventas:', error);
-  //     throw new InternalServerErrorException(
-  //       'No se pudo obtener el total de ventas',
-  //     );
-  //   }
-  // }
   async getVentasDiaII(idSucursal: number) {
     try {
       // Obtenemos la fecha de "hoy"
@@ -338,17 +292,23 @@ export class AnalyticsService {
       const month = now.getMonth();
       const day = now.getDate();
 
+      // get “now” in Guatemala
+      const guatToday = dayjs().tz('America/Guatemala');
+      const startOfLocalDay = guatToday.startOf('day').utc().toDate();
+      const endOfLocalDay = guatToday.endOf('day').utc().toDate();
+
       // Construimos el rango de la medianoche hasta las 23:59:59
       const startOfDay = new Date(year, month, day, 0, 0, 0);
       const endOfDay = new Date(year, month, day, 23, 59, 59);
 
       // Buscamos todas las ventas hechas entre ese rango de fechas (independiente de la hora exacta)
+      // then query with those:
       const ventasDeHoy = await this.prisma.venta.findMany({
         where: {
           sucursalId: idSucursal,
           fechaVenta: {
-            gte: startOfDay, // >= 2 de ene, 2025 00:00:00
-            lte: endOfDay, // <= 2 de ene, 2025 23:59:59
+            gte: startOfLocalDay,
+            lte: endOfLocalDay,
           },
         },
       });
@@ -363,6 +323,17 @@ export class AnalyticsService {
         `Total de ventas hoy para sucursal ${idSucursal}:`,
         totalDeHoy,
       );
+
+      console.log({
+        startOfDay,
+        endOfDay,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      });
+      console.log(
+        'Raw ventas:',
+        await this.prisma.venta.findMany(/* same filter */),
+      );
+
       return totalDeHoy;
     } catch (error) {
       console.error('Error al obtener el total de ventas de hoy:', error);
@@ -370,26 +341,6 @@ export class AnalyticsService {
         'No se pudo obtener el total de ventas de hoy',
       );
     }
-  }
-
-  create(createAnalyticsDto: CreateAnalyticsDto) {
-    return 'This action adds a new analytics';
-  }
-
-  findAll() {
-    return `This action returns all analytics`;
-  }
-
-  findOne(id: number) {
-    return `This action returns a #${id} analytics`;
-  }
-
-  update(id: number, updateAnalyticsDto: UpdateAnalyticsDto) {
-    return `This action updates a #${id} analytics`;
-  }
-
-  remove(id: number) {
-    return `This action removes a #${id} analytics`;
   }
 
   async getSucursalesSummary() {

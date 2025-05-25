@@ -17,11 +17,6 @@ import { UpdateAnalyticsDto } from './dto/update-analytics.dto';
 export class AnalyticsController {
   constructor(private readonly analyticsService: AnalyticsService) {}
 
-  @Post()
-  create(@Body() createAnalyticsDto: CreateAnalyticsDto) {
-    return this.analyticsService.create(createAnalyticsDto);
-  }
-
   @Get('/venta-dia/:idSucursal')
   async getVentasDiaII(@Param('idSucursal', ParseIntPipe) idSucursal: number) {
     console.log(
@@ -69,23 +64,5 @@ export class AnalyticsController {
   @Get('/get-ventas-recientes/')
   getVentasRecientes() {
     return this.analyticsService.getVentasRecientes();
-  }
-
-  @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.analyticsService.findOne(+id);
-  }
-
-  @Patch(':id')
-  update(
-    @Param('id') id: string,
-    @Body() updateAnalyticsDto: UpdateAnalyticsDto,
-  ) {
-    return this.analyticsService.update(+id, updateAnalyticsDto);
-  }
-
-  @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.analyticsService.remove(+id);
   }
 }
