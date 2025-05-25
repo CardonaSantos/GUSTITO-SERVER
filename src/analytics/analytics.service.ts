@@ -19,47 +19,36 @@ export class AnalyticsService {
 
   async getTotalVentasMontoSemana(sucursalId: number) {
     try {
-      // Obtener la fecha actual
-      const fechaActual = new Date();
+      // 1. “Now” in Guatemala
+      const guatNow = dayjs().tz('America/Guatemala');
 
-      // Calcular el primer día de la semana (lunes)
-      const diaSemana = fechaActual.getDay();
-      const diferencia = diaSemana === 0 ? -6 : 1 - diaSemana; // Si es domingo (0), retroceder 6 días; sino, calcular desde lunes
-      const primerDiaSemana = new Date(
-        fechaActual.setDate(fechaActual.getDate() + diferencia),
-      );
-      primerDiaSemana.setHours(0, 0, 0, 0); // Establecer hora al inicio del día (00:00)
+      // 2. Compute start of week (Monday) & end of week (Sunday) in local time
+      //    day(): Sunday=0, Monday=1, … Saturday=6
+      const daysSinceMonday = (guatNow.day() + 6) % 7;
+      const startLocal = guatNow
+        .subtract(daysSinceMonday, 'day')
+        .startOf('day'); // Monday 00:00
+      const endLocal = startLocal.add(6, 'day').endOf('day'); // Sunday 23:59:59.999
 
-      // Calcular el último día de la semana (domingo)
-      const ultimoDiaSemana = new Date(primerDiaSemana);
-      ultimoDiaSemana.setDate(primerDiaSemana.getDate() + 6);
-      ultimoDiaSemana.setHours(23, 59, 59, 999); // Establecer hora al final del día (23:59:59)
+      // 3. Convert those to UTC instants for the query
+      const startUTC = startLocal.utc().toDate();
+      const endUTC = endLocal.utc().toDate();
 
-      // Inicializar el monto total de la semana
-      let montoTotalSemana = 0;
-
-      // Consultar las ventas de la semana
-      const ventasTotalMonto = await this.prisma.venta.findMany({
+      // 4. Fetch & sum
+      const ventas = await this.prisma.venta.findMany({
         where: {
-          sucursalId: sucursalId,
+          sucursalId,
           fechaVenta: {
-            gte: primerDiaSemana,
-            lte: ultimoDiaSemana,
+            gte: startUTC,
+            lte: endUTC,
           },
         },
-        select: {
-          totalVenta: true,
-        },
+        select: { totalVenta: true },
       });
 
-      // Sumar los montos de las ventas
-      ventasTotalMonto.forEach((venta) => {
-        montoTotalSemana += venta.totalVenta;
-      });
-
-      return montoTotalSemana; // Devolver el monto total de la semana
+      return ventas.reduce((sum, { totalVenta }) => sum + totalVenta, 0);
     } catch (error) {
-      console.log(error);
+      console.error('Error al calcular monto semanal:', error);
       throw new InternalServerErrorException(
         'Error al calcular el monto total de ventas de la semana',
       );
@@ -202,35 +191,34 @@ export class AnalyticsService {
 
   async getVentasMes(idSucursal: number) {
     try {
-      const añoActual = new Date().getFullYear();
-      const mesActual = new Date().getMonth();
-      const primerDia = new Date(añoActual, mesActual, 1);
-      const ultimoDia = new Date(añoActual, mesActual + 1, 0);
+      // 1. Grab “now” in Guatemala time
+      const guatNow = dayjs().tz('America/Guatemala');
+      // 2. Compute start/end of the LOCAL month
+      const startOfMonth = guatNow.startOf('month').utc().toDate();
+      const endOfMonth = guatNow.endOf('month').utc().toDate();
 
+      // 3. Query between those UTC instants
       const ventasMes = await this.prisma.venta.findMany({
         where: {
           sucursalId: idSucursal,
           fechaVenta: {
-            gte: primerDia,
-            lte: ultimoDia,
+            gte: startOfMonth,
+            lte: endOfMonth,
           },
         },
-        orderBy: {
-          fechaVenta: 'desc',
-        },
-        select: {
-          totalVenta: true,
-        },
+        orderBy: { fechaVenta: 'desc' },
+        select: { totalVenta: true },
       });
 
+      // 4. Sum up
       const totalVentasMes = ventasMes.reduce(
-        (total, venta) => total + venta.totalVenta,
+        (sum, v) => sum + v.totalVenta,
         0,
       );
 
       return totalVentasMes;
     } catch (error) {
-      console.log(error);
+      console.error('Error al encontrar los registros de venta:', error);
       throw new InternalServerErrorException(
         'Error al encontrar los registros de venta',
       );
