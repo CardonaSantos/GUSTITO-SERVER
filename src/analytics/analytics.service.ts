@@ -187,7 +187,7 @@ export class AnalyticsService {
     }
   }
 
-  //--------------------------------------------------
+  //------------------DIA, SEMANA, MES--------------------------------
 
   async getVentasMes(idSucursal: number) {
     try {
