@@ -25,35 +25,23 @@ export class StockService {
       const { proveedorId, stockEntries, sucursalId, recibidoPorId } =
         createStockDto;
 
-      console.log('Los otros ids son: ', {
-        proveedorId,
-        stockEntries,
-        sucursalId,
-        recibidoPorId,
-      });
-
-      // Calcular el costo total de la entrega sumando los productos
       const costoStockEntrega = stockEntries.reduce(
         (total, entry) => total + entry.cantidad * entry.precioCosto,
         0,
       );
 
-      // Crear el registro de EntregaStock
       const newRegistDeliveryStock = await this.prisma.entregaStock.create({
         data: {
           proveedorId: proveedorId,
           montoTotal: costoStockEntrega,
-          // Agregamos el usuario que recibe si está disponible
           recibidoPorId: recibidoPorId,
           sucursalId: sucursalId,
         },
       });
 
-      console.log('El nuevo registro de entrega es: ', newRegistDeliveryStock);
-
       // Crear registros de Stock asociados a la entrega
       for (const entry of stockEntries) {
-        const registroStock = await this.prisma.stock.create({
+        await this.prisma.stock.create({
           data: {
             productoId: entry.productoId,
             cantidad: entry.cantidad,
@@ -63,13 +51,11 @@ export class StockService {
             precioCosto: entry.precioCosto,
             entregaStockId: newRegistDeliveryStock.id, // Asociar con la entrega
             sucursalId: sucursalId,
+            cantidadInicial: entry.cantidad,
           },
         });
-
-        console.log('El registro de stock es: ', registroStock);
       }
 
-      console.log('Entrega y stock registrados correctamente.');
       return newRegistDeliveryStock;
     } catch (error) {
       console.error('Error al crear la entrega de stock:', error);
@@ -83,13 +69,6 @@ export class StockService {
     try {
       const { proveedorId, stockEntries, sucursalId, recibidoPorId } =
         createStockDto;
-
-      console.log('Recibido para empaques:', {
-        proveedorId,
-        stockEntries,
-        sucursalId,
-        recibidoPorId,
-      });
 
       // Calcular el costo total
       const costoTotalEntrega = stockEntries.reduce(
@@ -107,8 +86,6 @@ export class StockService {
         },
       });
 
-      console.log('Entrega registrada:', newEntrega);
-
       // Registrar cada entrada de stock para empaque
       for (const entry of stockEntries) {
         const newStock = await this.prisma.stock.create({
@@ -125,8 +102,6 @@ export class StockService {
             sucursalId,
           },
         });
-
-        console.log('Stock registrado para empaque:', newStock);
       }
 
       return newEntrega;
@@ -361,8 +336,6 @@ export class StockService {
           id: stockToDelete.id,
         },
       });
-
-      console.log('El stock a sido eliminado');
 
       return stockToDelete;
     } catch (error) {

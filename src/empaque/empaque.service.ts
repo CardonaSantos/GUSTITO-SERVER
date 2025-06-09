@@ -79,7 +79,14 @@ export class EmpaqueService {
       throw new NotFoundException(`Empaques no encontrados.`);
     }
 
-    return empaques.map((empaque) => ({
+    const orders = empaques.sort((a, b) => {
+      let a2 =
+        a.stock.reduce((acc, stock) => acc + stock.cantidad, 0) -
+        b.stock.reduce((acc, stock) => acc + stock.cantidad, 0);
+      return a2;
+    });
+
+    return orders.map((empaque) => ({
       id: empaque.id,
       nombre: empaque.nombre,
       descripcion: empaque.descripcion,

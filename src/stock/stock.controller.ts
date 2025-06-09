@@ -21,9 +21,6 @@ export class StockController {
 
   @Post()
   async create(@Body() createStockDto: StockEntryDTO) {
-    console.log('Entrando al stock controller');
-    console.log('Los datos en el controller son: ', createStockDto);
-
     return await this.stockService.create(createStockDto);
   }
 

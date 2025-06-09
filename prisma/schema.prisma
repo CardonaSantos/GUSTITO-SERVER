@@ -502,6 +502,7 @@ model Stock {
   empaqueId         Int?        // OPCIONAL
   empaque           Empaque?    @relation(fields: [empaqueId], references: [id], onDelete: Cascade)
 
+  cantidadInicial    Int?        // Cantidad inicial de productos entregados
   cantidad          Int
   costoTotal        Float
   creadoEn          DateTime     @default(now())
@@ -571,6 +572,7 @@ model EntregaStock {
   //NUEVO
   sucursalId      Int?         // NUEVO: Relación con la sucursal
   sucursal        Sucursal?    @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
+  //DATOS PARA MANTENER INICIAL DATO
 }
 
 model Usuario {

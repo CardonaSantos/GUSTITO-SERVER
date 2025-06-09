@@ -17,7 +17,7 @@ export class VencimientosController {
 
   @Post()
   create(@Body() createVencimientoDto: CreateVencimientoDto) {
-    return this.vencimientosService.create(createVencimientoDto);
+    // return this.vencimientosService.create(createVencimientoDto);
   }
 
   @Get('/get-all-regist-expiration')

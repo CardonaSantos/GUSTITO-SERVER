@@ -22,7 +22,6 @@ export class WebsocketGateway
   server: Server;
 
   // EventEmitter.defaultMaxListeners = 30; // O cualquier número que consideres adecuado
-  // Mantenemos tres mapas separados para diferentes roles
   private vendedores: Map<number, string> = new Map();
   private admins: Map<number, string> = new Map();
   private usuarios: Map<number, string> = new Map();
@@ -37,34 +36,6 @@ export class WebsocketGateway
     return client.handshake.query.rol as string;
   }
 
-  // handleConnection(client: Socket) {
-  //   const userID = this.getUserIDFromClient(client);
-  //   const rol = this.getUserRoleFromClient(client);
-
-  //   // Validamos que el userID sea un número y que no esté duplicado
-  //   if (!isNaN(userID)) {
-  //     if (this.usuarios.has(userID)) {
-  //       console.log(`Conexión duplicada detectada para el usuario ${userID}.`);
-  //       client.disconnect(); // Desconecta el socket duplicado
-  //     } else {
-  //       this.usuarios.set(userID, client.id); // Guardamos en el mapa general
-
-  //       // Asignamos al mapa correspondiente según el rol
-  //       if (rol === 'ADMIN') {
-  //         this.admins.set(userID, client.id);
-  //       } else {
-  //         this.vendedores.set(userID, client.id);
-  //       }
-
-  //       console.log(
-  //         `Cliente conectado: UserID: ${userID}, SocketID: ${client.id}`,
-  //       );
-  //       this.logUsuarios(); // Log de los usuarios conectados
-  //     }
-  //   } else {
-  //     console.log(`ID de usuario inválido: ${userID}`);
-  //   }
-  // }
   handleConnection(client: Socket) {
     client.setMaxListeners(40); // Cambia 30 al valor que necesites
     const userID = this.getUserIDFromClient(client);
@@ -102,7 +73,6 @@ export class WebsocketGateway
   handleDisconnect(client: Socket) {
     const userID = this.getUserIDFromClient(client);
     const rol = this.getUserRoleFromClient(client);
-
     // Eliminamos el cliente de todos los mapas
     if (!isNaN(userID)) {
       this.usuarios.delete(userID);
