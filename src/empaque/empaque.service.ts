@@ -1,4 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  HttpException,
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { CreateEmpaqueDto } from './dto/create-empaque.dto';
 import { UpdateEmpaqueDto } from './dto/update-empaque.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
@@ -22,6 +28,10 @@ export class EmpaqueService {
 
   async findAll() {
     const empaques = await this.prisma.empaque.findMany({
+      where: {
+        isDeleted: false,
+      },
+
       include: {
         stock: {
           where: {
@@ -126,15 +136,40 @@ export class EmpaqueService {
     });
   }
 
-  async remove(id: number) {
-    const empaque = await this.prisma.empaque.findUnique({
-      where: { id },
-    });
-    if (!empaque) {
-      throw new NotFoundException(`Empaque con id ${id} no encontrado.`);
+  async markAsDeletedEmpaque(empaqueID: number) {
+    try {
+      if (!empaqueID) {
+        throw new BadRequestException({
+          message: 'ID no proporcionado',
+        });
+      }
+
+      const empaqueToMarkAsDeleted = await this.prisma.empaque.update({
+        where: {
+          id: empaqueID,
+        },
+        data: {
+          isDeleted: true,
+        },
+      });
+      return empaqueToMarkAsDeleted;
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new InternalServerErrorException({
+        message: 'Fatal error: Error inesperado',
+      });
     }
-    return await this.prisma.empaque.delete({
-      where: { id },
-    });
+  }
+
+  async remove(id: number) {
+    // const empaque = await this.prisma.empaque.findUnique({
+    //   where: { id },
+    // });
+    // if (!empaque) {
+    //   throw new NotFoundException(`Empaque con id ${id} no encontrado.`);
+    // }
+    // return await this.prisma.empaque.delete({
+    //   where: { id },
+    // });
   }
 }

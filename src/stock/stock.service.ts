@@ -92,6 +92,7 @@ export class StockService {
           data: {
             empaqueId: entry.empaqueId, // <- importante
             cantidad: entry.cantidad,
+            cantidadInicial: entry.cantidad,
             costoTotal: entry.cantidad * entry.precioCosto,
             fechaIngreso: new Date(entry.fechaIngreso),
             fechaVencimiento: entry.fechaVencimiento

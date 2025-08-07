@@ -6,6 +6,7 @@ import {
   Patch,
   Param,
   Delete,
+  ParseIntPipe,
 } from '@nestjs/common';
 import { EmpaqueService } from './empaque.service';
 import { CreateEmpaqueDto } from './dto/create-empaque.dto';
@@ -38,6 +39,11 @@ export class EmpaqueController {
   @Patch(':id')
   update(@Param('id') id: string, @Body() updateEmpaqueDto: UpdateEmpaqueDto) {
     return this.empaqueService.update(+id, updateEmpaqueDto);
+  }
+
+  @Delete('/mark-deleted/:id')
+  markAsDeleted(@Param('id', ParseIntPipe) id: number) {
+    return this.empaqueService.markAsDeletedEmpaque(id);
   }
 
   @Delete(':id')

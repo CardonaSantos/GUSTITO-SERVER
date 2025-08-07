@@ -373,6 +373,8 @@ model Producto {
   VentaEliminadaProducto VentaEliminadaProducto[]
 
   Reparacion Reparacion[]
+  isDeleted         Boolean   @default(false)  // ← flag de borrado suave
+  deletedAt       DateTime?   
 }
 
 model Empaque {
@@ -389,8 +391,10 @@ model Empaque {
   HistorialStock   HistorialStock[]    // Control de movimientos
   AjusteStock      AjusteStock[]       // Ajustes aplicados
   EliminacionStock EliminacionStock[]
-}
 
+  isDeleted         Boolean   @default(false)  // ← flag de borrado suave
+  deletedAt       DateTime? 
+}
 
 model HistorialPrecioCosto {
   id                Int       @id @default(autoincrement())
@@ -403,7 +407,6 @@ model HistorialPrecioCosto {
   modificadoPorId     Int?
   modificadoPor       Usuario?   @relation(fields: [modificadoPorId], references: [id], onDelete: Cascade) // Relación con Usuario
 }
-
 
 model PrecioProducto {
   id                Int        @id @default(autoincrement())
@@ -428,7 +431,6 @@ model HistorialPrecio {
   fechaCambio     DateTime    @default(now())
 }
 
-//=======================>
 model AjusteStock {
   id               Int       @id @default(autoincrement())
 
@@ -448,7 +450,6 @@ model AjusteStock {
   descripcion      String?
 }
 
-
 model EliminacionStock {
   id           Int       @id @default(autoincrement())
 
@@ -467,7 +468,6 @@ model EliminacionStock {
   motivo       String?
 }
 
-// Enum para tipo de ajuste
 enum TipoAjuste {
   INCREMENTO
   DECREMENTO
@@ -520,7 +520,6 @@ model Stock {
 
   AjusteStock       AjusteStock[]
 }
-
 
 model Sucursal {
   id              Int         @id @default(autoincrement())
@@ -643,7 +642,6 @@ model MetaUsuario {
   // @@index([usuarioId, sucursalId])
 }
 
-
 model MetaCobros {
   id            Int       @id @default(autoincrement())
   usuarioId     Int       // Relación con el usuario
@@ -694,8 +692,6 @@ model DepositoCobro {
   metaCobro       MetaCobros     @relation(fields: [metaCobroId], references: [id], onDelete: Cascade) // Relación N:1 con MetaCobros
 }
 
-
-
 model Cliente {
   id              Int          @id @default(autoincrement())
   nombre          String
@@ -721,7 +717,6 @@ model Cliente {
   VentaCuota VentaCuota[]
   Reparacion Reparacion[]
 }
-
 
 model Garantia {
   id                 Int                @id @default(autoincrement())
@@ -790,7 +785,6 @@ model Pago {
   fechaPago       DateTime  @default(now())
 }
 
-
 model HistorialStock {
   id                Int       @id @default(autoincrement())
   productoId        Int?      // opcional
@@ -803,7 +797,6 @@ model HistorialStock {
   cantidadNueva     Int
   fechaCambio       DateTime  @default(now())
 }
-
 
 model Venta {
   id              Int         @id @default(autoincrement())
