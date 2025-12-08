@@ -191,23 +191,25 @@ export class ProductsService {
   async productToEdit(id: number) {
     try {
       const product = await this.prisma.producto.findUnique({
-        where: {
-          id,
-        },
+        where: { id },
         include: {
           categorias: true,
           precios: {
             select: {
               id: true,
               precio: true,
+              orden: true,
+            },
+            orderBy: {
+              orden: 'asc',
             },
           },
         },
       });
       return product;
     } catch (error) {
-      console.error('Error en findAll productos:', error); // Proporcionar más contexto en el error
-      throw new InternalServerErrorException('Error al obtener los productos');
+      console.error('Error en productToEdit:', error);
+      throw new InternalServerErrorException('Error al obtener el producto');
     }
   }
 
@@ -270,16 +272,10 @@ export class ProductsService {
   }
 
   async update(id: number, updateProductDto: UpdateProductDto) {
-    console.log(
-      'Los datos a usar son: ID: ',
-      id,
-      ' LOS OTROS DATOS: ',
-      updateProductDto,
-    );
+    console.log('Los datos a usar son:', id, updateProductDto);
+
     const productoAnterior = await this.prisma.producto.findUnique({
-      where: {
-        id: id,
-      },
+      where: { id },
     });
 
     try {
@@ -302,20 +298,31 @@ export class ProductsService {
         },
       });
 
-      // Aquí vamos a manejar los precios
+      // 🔹 Mantener los precios sincronizados: update / create / delete
       for (const price of updateProductDto.precios) {
         if (price.id) {
-          // Actualizar precio existente
-          await this.prisma.precioProducto.update({
-            where: { id: price.id },
-            data: { precio: price.precio },
-          });
-        } else {
-          // Crear nuevo precio (si es necesario, aunque en este caso no parece que se deba añadir)
+          if (price.eliminar) {
+            // eliminar precio existente
+            await this.prisma.precioProducto.delete({
+              where: { id: price.id },
+            });
+          } else {
+            // actualizar precio existente (precio + orden)
+            await this.prisma.precioProducto.update({
+              where: { id: price.id },
+              data: {
+                precio: price.precio,
+                orden: price.orden,
+              },
+            });
+          }
+        } else if (!price.eliminar) {
+          // crear nuevo precio
           await this.prisma.precioProducto.create({
             data: {
               estado: 'APROBADO',
               precio: price.precio,
+              orden: price.orden,
               creadoPorId: updateProductDto.usuarioId,
               productoId: productoUpdate.id,
               tipo: 'ESTANDAR',
@@ -324,35 +331,20 @@ export class ProductsService {
         }
       }
 
+      // 🔹 Historial de cambio de costo
       if (productoAnterior && productoUpdate) {
-        console.log(
-          'Precio anterior:',
-          productoAnterior.precioCostoActual,
-          'Precio nuevo:',
-          productoUpdate.precioCostoActual,
-        );
-
         if (
-          //
           Number(productoAnterior.precioCostoActual) !==
           Number(productoUpdate.precioCostoActual)
         ) {
-          console.log('El precio ha cambiado, actualizando');
-
-          const nuevoRegistroPrecioCosto =
-            await this.prisma.historialPrecioCosto.create({
-              data: {
-                productoId: productoAnterior.id,
-                precioCostoAnterior: Number(productoAnterior.precioCostoActual),
-                precioCostoNuevo: Number(productoUpdate.precioCostoActual),
-                modificadoPorId: updateProductDto.usuarioId,
-              },
-            });
-
-          console.log(
-            'El nuevo registro de cambio de precio es: ',
-            nuevoRegistroPrecioCosto,
-          );
+          await this.prisma.historialPrecioCosto.create({
+            data: {
+              productoId: productoAnterior.id,
+              precioCostoAnterior: Number(productoAnterior.precioCostoActual),
+              precioCostoNuevo: Number(productoUpdate.precioCostoActual),
+              modificadoPorId: updateProductDto.usuarioId,
+            },
+          });
         }
       }
 

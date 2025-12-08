@@ -1,49 +1,55 @@
-import { PartialType } from '@nestjs/mapped-types';
-import { CreateProductDto } from './create-product.dto';
 import {
   IsArray,
   IsInt,
+  IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
+  Min,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 
-class PriceDto {
+class UpdatePriceDto {
+  @IsOptional()
   @IsInt()
-  id: number;
+  id?: number;
 
   @IsNumber()
   precio: number;
+
+  @IsInt()
+  @Min(1)
+  orden: number;
+
+  @IsOptional()
+  eliminar?: boolean;
 }
 
 export class UpdateProductDto {
+  @IsString()
+  @IsNotEmpty()
+  codigoProducto: string;
+
+  @IsString()
+  @IsNotEmpty()
+  nombre: string;
+
   @IsOptional()
   @IsString()
-  nombre: string; // Nombre del producto
+  descripcion?: string;
 
   @IsNumber()
   precioCostoActual: number;
 
-  @IsString()
-  @IsOptional()
-  codigoProducto: string; // Código único del producto
-
-  @IsString()
-  @IsOptional()
-  descripcion: string; // Código único del producto
-
-  @IsNumber()
-  @IsOptional()
-  precioVenta: number; // Precio de venta del producto
-
   @IsArray()
-  @IsOptional()
-  categorias?: number[]; // IDs de categorías asociadas (opcional)
-
-  @IsArray()
-  @IsOptional()
-  precios: PriceDto[]; // Arreglo de objetos precio
+  categorias: number[];
 
   @IsInt()
   usuarioId: number;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => UpdatePriceDto)
+  precios: UpdatePriceDto[];
 }

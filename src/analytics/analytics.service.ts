@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   InternalServerErrorException,
+  Logger,
 } from '@nestjs/common';
 import { CreateAnalyticsDto } from './dto/create-analytics.dto';
 import { UpdateAnalyticsDto } from './dto/update-analytics.dto';
@@ -10,11 +11,26 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import * as dayjs from 'dayjs';
 import * as utc from 'dayjs/plugin/utc';
 import * as tz from 'dayjs/plugin/timezone';
+import { throwFatalError } from 'src/Utils/CommonFatalErrors';
+import { TZGT } from 'src/Utils/TimeZone';
 dayjs.extend(utc);
 dayjs.extend(tz);
 
+type Item = {
+  id: number;
+  fechaVenta: Date;
+  totalVenta: number;
+};
+// COLORES DE MARCA "GUSTITO"
+const BRAND_COLORS = {
+  ventas: '#591C63', // Morado Oscuro
+  egresos: '#EE8888', // Rosa/Salmón
+  depositos: '#9C6AA1', // Lila Medio
+};
+
 @Injectable()
 export class AnalyticsService {
+  private readonly logger = new Logger(AnalyticsService.name);
   constructor(private readonly prisma: PrismaService) {}
 
   async getTotalVentasMontoSemana(sucursalId: number) {
@@ -307,21 +323,6 @@ export class AnalyticsService {
         0,
       );
 
-      console.log(
-        `Total de ventas hoy para sucursal ${idSucursal}:`,
-        totalDeHoy,
-      );
-
-      console.log({
-        startOfDay,
-        endOfDay,
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      });
-      console.log(
-        'Raw ventas:',
-        await this.prisma.venta.findMany(/* same filter */),
-      );
-
       return totalDeHoy;
     } catch (error) {
       console.error('Error al obtener el total de ventas de hoy:', error);
@@ -342,5 +343,172 @@ export class AnalyticsService {
     // Opcionalmente podrías hacer cálculos o mapear los datos,
     // pero por ahora simplemente retornamos todo tal cual
     return sucursales;
+  }
+
+  //PETICIONES  DE ANALISIS
+
+  async analitycsVentas(id: number) {
+    try {
+      const today = dayjs().tz(TZGT);
+
+      const [diaData, semanaData, mesData, anioData] = await Promise.all([
+        this.comparativasDia(id),
+
+        // CORRECCIÓN "PUNTO ÚNICO":
+        // En lugar de startOf('week'), usamos los últimos 7 días hacia atrás
+        // para asegurar que siempre haya una línea llena.
+        this.getHistoricalData(
+          id,
+          today.subtract(6, 'day').startOf('day').toDate(), // Desde hace 6 días
+          today.endOf('day').toDate(), // Hasta hoy final del día
+          'DD/MM',
+        ),
+
+        // Mes actual (Aquí sí está bien startOf month)
+        this.getHistoricalData(
+          id,
+          today.startOf('month').toDate(),
+          today.endOf('month').toDate(),
+          'DD/MM',
+        ),
+
+        // Año (Agrupado por Mes)
+        this.getHistoricalData(
+          id,
+          today.startOf('year').toDate(),
+          today.endOf('year').toDate(),
+          'MMM', // Ene, Feb, Mar...
+        ),
+      ]);
+
+      return { dia: diaData, semana: semanaData, mes: mesData, anio: anioData };
+    } catch (error) {
+      this.logger.error(error);
+      throw error;
+    }
+  }
+
+  async comparativasDia(id: number) {
+    const todayStart = dayjs().tz(TZGT).startOf('day').toDate();
+    const todayEnd = dayjs().tz(TZGT).endOf('day').toDate();
+
+    const [ventas, egresos, depositos] = await Promise.all([
+      this.prisma.venta.aggregate({
+        where: {
+          sucursalId: id,
+          fechaVenta: { gte: todayStart, lte: todayEnd },
+        },
+        _sum: { totalVenta: true },
+      }),
+      this.prisma.egreso.aggregate({
+        where: {
+          sucursalId: id,
+          fechaEgreso: { gte: todayStart, lte: todayEnd },
+        },
+        _sum: { monto: true },
+      }),
+      this.prisma.deposito.aggregate({
+        where: {
+          sucursalId: id,
+          fechaDeposito: { gte: todayStart, lte: todayEnd },
+        },
+        _sum: { monto: true },
+      }),
+    ]);
+
+    // Usamos los colores de la marca aquí también
+    return [
+      {
+        id: 'Ventas',
+        label: 'Ventas',
+        value: Number(ventas._sum.totalVenta || 0),
+        color: BRAND_COLORS.ventas,
+      },
+      {
+        id: 'Egresos',
+        label: 'Egresos',
+        value: Number(egresos._sum.monto || 0),
+        color: BRAND_COLORS.egresos,
+      },
+      {
+        id: 'Depósitos',
+        label: 'Depósitos',
+        value: Number(depositos._sum.monto || 0),
+        color: BRAND_COLORS.depositos,
+      },
+    ];
+  }
+
+  private async getHistoricalData(
+    id: number,
+    startDate: Date,
+    endDate: Date,
+    format: string,
+  ) {
+    const [ventasRaw, egresosRaw, depositosRaw] = await Promise.all([
+      this.prisma.venta.findMany({
+        where: { sucursalId: id, fechaVenta: { gte: startDate, lte: endDate } },
+        select: { fechaVenta: true, totalVenta: true },
+        orderBy: { fechaVenta: 'asc' },
+      }),
+      this.prisma.egreso.findMany({
+        where: {
+          sucursalId: id,
+          fechaEgreso: { gte: startDate, lte: endDate },
+        },
+        select: { fechaEgreso: true, monto: true },
+        orderBy: { fechaEgreso: 'asc' },
+      }),
+      this.prisma.deposito.findMany({
+        where: {
+          sucursalId: id,
+          fechaDeposito: { gte: startDate, lte: endDate },
+        },
+        select: { fechaDeposito: true, monto: true },
+        orderBy: { fechaDeposito: 'asc' },
+      }),
+    ]);
+
+    const processSeries = (
+      data: any[],
+      dateField: string,
+      amountField: string,
+    ) => {
+      // 1. Agrupar datos existentes
+      const grouped = data.reduce((acc: Record<string, number>, item) => {
+        let key = dayjs(item[dateField]).format(format);
+        if (format === 'MMM') key = key.charAt(0).toUpperCase() + key.slice(1);
+        const amount = Number(item[amountField]) || 0;
+        acc[key] = (acc[key] || 0) + amount;
+        return acc;
+      }, {});
+
+      // 2. (OPCIONAL PERO RECOMENDADO) Rellenar huecos con 0 si quieres la línea perfecta
+      // Para simplificar, retornamos lo agrupado, pero el cambio de fecha "Last 7 days"
+      // arriba ya debería asegurar que la línea se vea mejor distribuida.
+
+      return Object.entries(grouped).map(([date, total]) => ({
+        x: date,
+        y: total,
+      }));
+    };
+
+    return [
+      {
+        id: 'Ventas',
+        color: BRAND_COLORS.ventas,
+        data: processSeries(ventasRaw, 'fechaVenta', 'totalVenta'),
+      },
+      {
+        id: 'Egresos',
+        color: BRAND_COLORS.egresos,
+        data: processSeries(egresosRaw, 'fechaEgreso', 'monto'),
+      },
+      {
+        id: 'Depósitos',
+        color: BRAND_COLORS.depositos,
+        data: processSeries(depositosRaw, 'fechaDeposito', 'monto'),
+      },
+    ];
   }
 }

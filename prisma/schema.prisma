@@ -1,10 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -14,134 +7,732 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-
-
-
 model Reparacion {
-  id                 Int                @id @default(autoincrement())
-  usuarioId          Int                // ID del usuario que atendió
-  usuario            Usuario            @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
-
-  sucursalId         Int                // ID de la sucursal donde se realiza la reparación
-  sucursal           Sucursal           @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
-
-  clienteId          Int                // Cliente asociado a la reparación
-  cliente            Cliente            @relation(fields: [clienteId], references: [id], onDelete: Cascade)
-
-  productoId         Int?               // Producto del sistema (opcional)
-  producto           Producto?          @relation(fields: [productoId], references: [id], onDelete: SetNull)
-
-  productoExterno    String?            // Nombre o descripción del producto externo
-
-  problemas          String             // Descripción de los problemas reportados
-  observaciones      String?            // Observaciones adicionales (ej. accesorios entregados)
-  
-  fechaRecibido      DateTime           @default(now()) // Fecha en que se recibió el producto
-  fechaEntregado     DateTime?          // Fecha de entrega del producto reparado
-  estado             EstadoReparacion   @default(PENDIENTE) // Estado actual de la reparación
-
-  registros          RegistroReparacion[] // Historial de acciones realizadas sobre la reparación
-
-  hojaSolucion       String?            // Detalles finales de la solución
-  creadoEn           DateTime           @default(now()) // Fecha de creación
-  actualizadoEn      DateTime           @updatedAt      // Última actualización
+  id              Int                  @id @default(autoincrement())
+  usuarioId       Int
+  sucursalId      Int
+  clienteId       Int
+  productoId      Int?
+  productoExterno String?
+  problemas       String
+  observaciones   String?
+  fechaRecibido   DateTime             @default(now())
+  fechaEntregado  DateTime?
+  estado          EstadoReparacion     @default(PENDIENTE)
+  hojaSolucion    String?
+  creadoEn        DateTime             @default(now())
+  actualizadoEn   DateTime             @updatedAt
+  registros       RegistroReparacion[]
+  cliente         Cliente              @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  producto        Producto?            @relation(fields: [productoId], references: [id])
+  sucursal        Sucursal             @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
+  usuario         Usuario              @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
 }
 
 model RegistroReparacion {
-  id                 Int                @id @default(autoincrement())
-  reparacionId       Int                // Relación con la reparación
-  reparacion         Reparacion         @relation(fields: [reparacionId], references: [id], onDelete: Cascade)
+  id                 Int              @id @default(autoincrement())
+  reparacionId       Int
+  usuarioId          Int
+  estado             EstadoReparacion
+  accionesRealizadas String
+  fechaRegistro      DateTime         @default(now())
+  comentarioFinal    String?
+  montoPagado        Int?
+  reparacion         Reparacion       @relation(fields: [reparacionId], references: [id], onDelete: Cascade)
+  usuario            Usuario          @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+}
 
-  usuarioId          Int                // Usuario que realizó la acción
-  usuario            Usuario            @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+model VentaCuota {
+  id                   Int         @id @default(autoincrement())
+  clienteId            Int
+  usuarioId            Int
+  sucursalId           Int
+  totalVenta           Float
+  cuotaInicial         Float
+  cuotasTotales        Int
+  fechaInicio          DateTime    @default(now())
+  estado               EstadoCuota @default(ACTIVA)
+  creadoEn             DateTime    @default(now())
+  actualizadoEn        DateTime    @updatedAt
+  dpi                  String
+  testigos             Json
+  fechaContrato        DateTime    @default(now())
+  montoVenta           Float
+  garantiaMeses        Int
+  totalPagado          Float       @default(0)
+  diasEntrePagos       Int         @default(0)
+  interes              Int         @default(0)
+  comentario           String?
+  ventaId              Int?        @unique
+  montoTotalConInteres Int?
+  cuotas               Cuota[]
+  cliente              Cliente     @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  sucursal             Sucursal    @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
+  usuario              Usuario     @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  venta                Venta?      @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+}
 
-  estado             EstadoReparacion   // Estado de la reparación al momento del registro
-  accionesRealizadas String             // Descripción de las acciones realizadas (opcional)
-  fechaRegistro      DateTime           @default(now()) // Fecha del registro
-  comentarioFinal    String?            // Comentario final sobre la reparación
+model Cuota {
+  id               Int        @id @default(autoincrement())
+  ventaCuotaId     Int
+  monto            Float
+  fechaVencimiento DateTime?
+  fechaPago        DateTime?
+  estado           EstadoPago @default(PENDIENTE)
+  usuarioId        Int?
+  creadoEn         DateTime   @default(now())
+  actualizadoEn    DateTime   @updatedAt
+  comentario       String?
+  montoEsperado    Float?
+  usuario          Usuario?   @relation(fields: [usuarioId], references: [id])
+  ventaCuota       VentaCuota @relation(fields: [ventaCuotaId], references: [id], onDelete: Cascade)
+}
 
-  montoPagado Int?
+model PlantillaComprobante {
+  id            Int       @id @default(autoincrement())
+  nombre        String
+  texto         String
+  sucursalId    Int?
+  creadoEn      DateTime  @default(now())
+  actualizadoEn DateTime  @updatedAt
+  sucursal      Sucursal? @relation(fields: [sucursalId], references: [id])
+}
+
+model VentaEliminada {
+  id                     Int                      @id @default(autoincrement())
+  usuarioId              Int
+  motivo                 String
+  totalVenta             Float
+  clienteId              Int?
+  fechaEliminacion       DateTime                 @default(now())
+  sucursalId             Int
+  cliente                Cliente?                 @relation(fields: [clienteId], references: [id])
+  sucursal               Sucursal                 @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
+  usuario                Usuario                  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  VentaEliminadaProducto VentaEliminadaProducto[]
+}
+
+model VentaEliminadaProducto {
+  id               Int            @id @default(autoincrement())
+  ventaEliminadaId Int
+  productoId       Int?
+  cantidad         Int
+  precioVenta      Float
+  creadoEn         DateTime       @default(now())
+  producto         Producto?      @relation(fields: [productoId], references: [id])
+  ventaEliminada   VentaEliminada @relation(fields: [ventaEliminadaId], references: [id], onDelete: Cascade)
+}
+
+model SucursalSaldo {
+  id             Int      @id @default(autoincrement())
+  sucursalId     Int      @unique
+  saldoAcumulado Float    @default(0)
+  totalIngresos  Float    @default(0)
+  totalEgresos   Float    @default(0)
+  actualizadoEn  DateTime @updatedAt
+  sucursal       Sucursal @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
+}
+
+model RegistroCaja {
+  id           Int         @id @default(autoincrement())
+  sucursalId   Int?
+  usuarioId    Int?
+  saldoInicial Float?
+  saldoFinal   Float?      @default(0)
+  fechaInicio  DateTime?   @default(now())
+  fechaCierre  DateTime?   @default(now())
+  estado       EstadoCaja? @default(ABIERTO)
+  comentario   String?
+  depositos    Deposito[]
+  egresos      Egreso[]
+  sucursal     Sucursal?   @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
+  usuario      Usuario?    @relation(fields: [usuarioId], references: [id])
+  ventas       Venta[]
+}
+
+model SucursalSaldoGlobal {
+  id            Int      @id @default(autoincrement())
+  saldoGlobal   Float    @default(0)
+  totalIngresos Float    @default(0)
+  totalEgresos  Float    @default(0)
+  actualizadoEn DateTime @updatedAt
+}
+
+model Deposito {
+  id              Int           @id @default(autoincrement())
+  registroCajaId  Int?
+  monto           Float
+  numeroBoleta    String
+  banco           String
+  fechaDeposito   DateTime      @default(now())
+  usadoParaCierre Boolean       @default(false)
+  descripcion     String?
+  sucursalId      Int?
+  usuarioId       Int?
+  registroCaja    RegistroCaja? @relation(fields: [registroCajaId], references: [id])
+  sucursal        Sucursal?     @relation(fields: [sucursalId], references: [id])
+  usuario         Usuario?      @relation(fields: [usuarioId], references: [id])
+}
+
+model Egreso {
+  id             Int           @id @default(autoincrement())
+  registroCajaId Int?
+  descripcion    String?
+  monto          Float
+  fechaEgreso    DateTime      @default(now())
+  sucursalId     Int?
+  usuarioId      Int?
+  registroCaja   RegistroCaja? @relation(fields: [registroCajaId], references: [id])
+  sucursal       Sucursal?     @relation(fields: [sucursalId], references: [id])
+  usuario        Usuario?      @relation(fields: [usuarioId], references: [id])
+}
+
+model TicketSorteo {
+  id                Int          @id @default(autoincrement())
+  descripcionSorteo String?
+  creadoEn          DateTime     @default(now())
+  actualizadoEn     DateTime     @updatedAt
+  estado            EstadoTicket
+}
+
+model Vencimiento {
+  id               Int               @id @default(autoincrement())
+  fechaVencimiento DateTime
+  estado           EstadoVencimiento @default(PENDIENTE)
+  descripcion      String?
+  stockId          Int?
+  fechaCreacion    DateTime          @default(now())
+  stock            Stock?            @relation(fields: [stockId], references: [id])
+}
+
+model Notificacion {
+  id                     Int                      @id @default(autoincrement())
+  mensaje                String
+  remitenteId            Int?
+  tipoNotificacion       TipoNotificacion
+  referenciaId           Int?
+  fechaCreacion          DateTime                 @default(now())
+  remitente              Usuario?                 @relation("Remitente", fields: [remitenteId], references: [id])
+  notificacionesUsuarios NotificacionesUsuarios[]
+  Usuario                Usuario[]                @relation("Destinatario")
+}
+
+model NotificacionesUsuarios {
+  id             Int          @id @default(autoincrement())
+  usuarioId      Int
+  notificacionId Int
+  leido          Boolean      @default(false)
+  eliminado      Boolean      @default(false)
+  leidoEn        DateTime?
+  recibidoEn     DateTime     @default(now())
+  notificacion   Notificacion @relation(fields: [notificacionId], references: [id], onDelete: Cascade)
+  usuario        Usuario      @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+}
+
+model SolicitudPrecio {
+  id               Int             @id @default(autoincrement())
+  productoId       Int
+  precioSolicitado Float
+  solicitadoPorId  Int
+  estado           EstadoSolicitud @default(PENDIENTE)
+  aprobadoPorId    Int?
+  fechaSolicitud   DateTime        @default(now())
+  fechaRespuesta   DateTime?
+  aprobadoPor      Usuario?        @relation("AprobadoPor", fields: [aprobadoPorId], references: [id])
+  producto         Producto        @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  solicitadoPor    Usuario         @relation("SolicitadoPor", fields: [solicitadoPorId], references: [id])
+}
+
+model Producto {
+  id                       Int                              @id @default(autoincrement())
+  nombre                   String
+  descripcion              String?
+  codigoProducto           String                           @unique
+  creadoEn                 DateTime                         @default(now())
+  actualizadoEn            DateTime                         @updatedAt
+  precioCostoActual        Float?
+  deletedAt                DateTime?
+  isDeleted                Boolean                          @default(false)
+  AjusteStock              AjusteStock[]
+  EliminacionProducto      EliminacionProducto[]
+  EliminacionStock         EliminacionStock[]
+  Garantia                 Garantia[]
+  HistorialPrecio          HistorialPrecio[]
+  HistorialPrecioCosto     HistorialPrecioCosto[]
+  HistorialStock           HistorialStock[]
+  precios                  PrecioProducto[]
+  RegistroGarantia         RegistroGarantia[]
+  Reparacion               Reparacion[]
+  SolicitudPrecio          SolicitudPrecio[]
+  solicitudesTransferencia SolicitudTransferenciaProducto[]
+  stock                    Stock[]
+  TransferenciaProducto    TransferenciaProducto[]
+  VentaEliminadaProducto   VentaEliminadaProducto[]
+  ventas                   VentaProducto[]
+  categorias               Categoria[]                      @relation("CategoriaToProducto")
+}
+
+model Empaque {
+  id               Int                @id @default(autoincrement())
+  nombre           String
+  descripcion      String
+  codigoProducto   String             @unique
+  creadoEn         DateTime           @default(now())
+  actualizadoEn    DateTime           @updatedAt
+  precioCosto      Float?
+  precioVenta      Float?
+  deletedAt        DateTime?
+  isDeleted        Boolean            @default(false)
+  AjusteStock      AjusteStock[]
+  EliminacionStock EliminacionStock[]
+  HistorialStock   HistorialStock[]
+  stock            Stock[]
+}
+
+model HistorialPrecioCosto {
+  id                  Int      @id @default(autoincrement())
+  productoId          Int
+  precioCostoAnterior Float
+  precioCostoNuevo    Float
+  fechaCambio         DateTime @default(now())
+  modificadoPorId     Int?
+  modificadoPor       Usuario? @relation(fields: [modificadoPorId], references: [id], onDelete: Cascade)
+  producto            Producto @relation(fields: [productoId], references: [id], onDelete: Cascade)
+}
+
+model PrecioProducto {
+  id            Int          @id @default(autoincrement())
+  productoId    Int?
+  precio        Float
+  creadoPorId   Int?
+  orden         Int?
+  fechaCreacion DateTime     @default(now())
+  estado        EstadoPrecio
+  usado         Boolean      @default(false)
+  tipo          TipoPrecio
+  creadoPor     Usuario?     @relation(fields: [creadoPorId], references: [id])
+  producto      Producto?    @relation(fields: [productoId], references: [id], onDelete: Cascade)
+}
+
+model HistorialPrecio {
+  id             Int      @id @default(autoincrement())
+  productoId     Int
+  precioAnterior Float
+  precioNuevo    Float
+  fechaCambio    DateTime @default(now())
+  producto       Producto @relation(fields: [productoId], references: [id], onDelete: Cascade)
+}
+
+model AjusteStock {
+  id               Int        @id @default(autoincrement())
+  productoId       Int?
+  empaqueId        Int?
+  stockId          Int?
+  cantidadAjustada Int
+  tipoAjuste       TipoAjuste
+  fechaHora        DateTime   @default(now())
+  usuarioId        Int?
+  descripcion      String?
+  empaque          Empaque?   @relation(fields: [empaqueId], references: [id])
+  producto         Producto?  @relation(fields: [productoId], references: [id])
+  stock            Stock?     @relation(fields: [stockId], references: [id])
+  usuario          Usuario?   @relation(fields: [usuarioId], references: [id])
+}
+
+model EliminacionStock {
+  id         Int       @id @default(autoincrement())
+  productoId Int?
+  empaqueId  Int?
+  fechaHora  DateTime  @default(now())
+  usuarioId  Int?
+  sucursalId Int?
+  motivo     String?
+  empaque    Empaque?  @relation(fields: [empaqueId], references: [id])
+  producto   Producto? @relation(fields: [productoId], references: [id])
+  sucursal   Sucursal? @relation(fields: [sucursalId], references: [id])
+  usuario    Usuario?  @relation(fields: [usuarioId], references: [id])
+}
+
+model EliminacionProducto {
+  id         Int      @id @default(autoincrement())
+  productoId Int
+  fechaHora  DateTime @default(now())
+  usuarioId  Int?
+  motivo     String?
+  producto   Producto @relation(fields: [productoId], references: [id])
+  usuario    Usuario? @relation(fields: [usuarioId], references: [id])
+}
+
+model EliminacionCliente {
+  id        Int      @id @default(autoincrement())
+  clienteId Int
+  fechaHora DateTime @default(now())
+  usuarioId Int?
+  motivo    String?
+  cliente   Cliente  @relation(fields: [clienteId], references: [id])
+  usuario   Usuario? @relation(fields: [usuarioId], references: [id])
+}
+
+model Stock {
+  id               Int           @id @default(autoincrement())
+  productoId       Int?
+  empaqueId        Int?
+  cantidad         Int
+  costoTotal       Float
+  creadoEn         DateTime      @default(now())
+  fechaIngreso     DateTime
+  fechaVencimiento DateTime?
+  precioCosto      Float
+  sucursalId       Int
+  entregaStockId   Int?
+  cantidadInicial  Int?
+  AjusteStock      AjusteStock[]
+  empaque          Empaque?      @relation(fields: [empaqueId], references: [id], onDelete: Cascade)
+  entregaStock     EntregaStock? @relation(fields: [entregaStockId], references: [id])
+  producto         Producto?     @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  sucursal         Sucursal      @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
+  Vencimiento      Vencimiento[]
+}
+
+model Sucursal {
+  id                           Int                              @id @default(autoincrement())
+  nombre                       String
+  direccion                    String?
+  telefono                     String?
+  pbx                          String?
+  creadoEn                     DateTime                         @default(now())
+  actualizadoEn                DateTime                         @updatedAt
+  tipoSucursal                 TipoSucursal
+  estadoOperacion              Boolean                          @default(true)
+  Deposito                     Deposito[]
+  DepositoCobro                DepositoCobro[]
+  Egreso                       Egreso[]
+  EliminacionStock             EliminacionStock[]
+  EntregaStock                 EntregaStock[]
+  MetaCobros                   MetaCobros[]
+  MetaUsuario                  MetaUsuario[]
+  PlantillaComprobante         PlantillaComprobante[]
+  RegistroCaja                 RegistroCaja[]
+  Reparacion                   Reparacion[]
+  solicitudesDestino           SolicitudTransferenciaProducto[] @relation("SucursalDestinoSolicitud")
+  solicitudesOrigen            SolicitudTransferenciaProducto[] @relation("SucursalOrigenSolicitud")
+  productos                    Stock[]
+  SucursalSaldo                SucursalSaldo?
+  TransferenciaProductoDestino TransferenciaProducto[]          @relation("SucursalDestino")
+  TransferenciaProducto        TransferenciaProducto[]          @relation("SucursalOrigen")
+  usuarios                     Usuario[]
+  Venta                        Venta[]
+  VentaCuota                   VentaCuota[]
+  VentaEliminada               VentaEliminada[]
+}
+
+model EntregaStock {
+  id              Int        @id @default(autoincrement())
+  proveedorId     Int?
+  montoTotal      Float
+  fechaEntrega    DateTime   @default(now())
+  recibidoPorId   Int?
+  sucursalId      Int?
+  proveedor       Proveedor? @relation(fields: [proveedorId], references: [id])
+  usuarioRecibido Usuario?   @relation("UsuarioRecibido", fields: [recibidoPorId], references: [id])
+  sucursal        Sucursal?  @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
+  stockEntregado  Stock[]
+}
+
+model Usuario {
+  id                                Int                              @id @default(autoincrement())
+  nombre                            String
+  rol                               Rol
+  contrasena                        String
+  activo                            Boolean                          @default(true)
+  correo                            String                           @unique
+  sucursalId                        Int
+  fecha_creacion                    DateTime                         @default(now())
+  fecha_actualizacion               DateTime                         @default(now())
+  AjusteStock                       AjusteStock[]
+  Cuota                             Cuota[]
+  Deposito                          Deposito[]
+  DepositoCobro                     DepositoCobro[]
+  Egreso                            Egreso[]
+  EliminacionCliente                EliminacionCliente[]
+  EliminacionProducto               EliminacionProducto[]
+  EliminacionStock                  EliminacionStock[]
+  entregasRecibidas                 EntregaStock[]                   @relation("UsuarioRecibido")
+  Garantia                          Garantia[]
+  HistorialPrecioCosto              HistorialPrecioCosto[]
+  MetaCobros                        MetaCobros[]
+  MetaUsuario                       MetaUsuario[]
+  notificacionesEnviadas            Notificacion[]                   @relation("Remitente")
+  notificacionesUsuarios            NotificacionesUsuarios[]
+  PrecioProducto                    PrecioProducto[]
+  RegistroCaja                      RegistroCaja[]
+  RegistroGarantia                  RegistroGarantia[]
+  RegistroReparacion                RegistroReparacion[]
+  Reparacion                        Reparacion[]
+  solicitudesAprobadas              SolicitudPrecio[]                @relation("AprobadoPor")
+  solicitudesPrecio                 SolicitudPrecio[]                @relation("SolicitadoPor")
+  solicitudesAprobadasTransferencia SolicitudTransferenciaProducto[] @relation("AdministradorAprobador")
+  solicitudesEnviadas               SolicitudTransferenciaProducto[] @relation("UsuarioSolicitante")
+  TransferenciaProducto             TransferenciaProducto[]
+  sucursal                          Sucursal                         @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
+  ventas                            Venta[]
+  VentaCuota                        VentaCuota[]
+  VentaEliminada                    VentaEliminada[]
+  notificacionesRecibidas           Notificacion[]                   @relation("Destinatario")
+}
+
+model MetaUsuario {
+  id            Int              @id @default(autoincrement())
+  usuarioId     Int
+  sucursalId    Int
+  fechaInicio   DateTime         @default(now())
+  fechaFin      DateTime
+  montoMeta     Float
+  montoActual   Float            @default(0)
+  cumplida      Boolean          @default(false)
+  fechaCumplida DateTime?
+  numeroVentas  Float
+  tituloMeta    String?
+  estado        EstadoMetaTienda
+  sucursal      Sucursal         @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
+  usuario       Usuario          @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+}
+
+model MetaCobros {
+  id              Int             @id @default(autoincrement())
+  usuarioId       Int
+  sucursalId      Int
+  fechaCreado     DateTime        @default(now())
+  fechaInicio     DateTime        @default(now())
+  fechaFin        DateTime
+  montoMeta       Float
+  montoActual     Float           @default(0)
+  cumplida        Boolean         @default(false)
+  fechaCumplida   DateTime?
+  numeroDepositos Int             @default(0)
+  tituloMeta      String?
+  estado          EstadoMetaCobro
+  DepositoCobro   DepositoCobro[]
+  sucursal        Sucursal        @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
+  usuario         Usuario         @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+}
+
+model DepositoCobro {
+  id              Int        @id @default(autoincrement())
+  usuarioId       Int
+  sucursalId      Int
+  numeroBoleta    String
+  fechaRegistro   DateTime   @default(now())
+  montoDepositado Float
+  descripcion     String?
+  metaCobroId     Int
+  metaCobro       MetaCobros @relation(fields: [metaCobroId], references: [id], onDelete: Cascade)
+  sucursal        Sucursal   @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
+  usuario         Usuario    @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+}
+
+model Cliente {
+  id                 Int                  @id @default(autoincrement())
+  nombre             String
+  telefono           String?
+  direccion          String?
+  creadoEn           DateTime             @default(now())
+  actualizadoEn      DateTime             @updatedAt
+  municipioId        Int?
+  departamentoId     Int?
+  dpi                String?
+  iPInternet         String?
+  departamento       Departamento?        @relation(fields: [departamentoId], references: [id])
+  municipio          Municipio?           @relation(fields: [municipioId], references: [id])
+  EliminacionCliente EliminacionCliente[]
+  Garantia           Garantia[]
+  Reparacion         Reparacion[]
+  compras            Venta[]
+  VentaCuota         VentaCuota[]
+  VentaEliminada     VentaEliminada[]
+
+  @@unique([dpi, id])
+}
+
+model Garantia {
+  id                  Int                @id @default(autoincrement())
+  clienteId           Int
+  productoId          Int
+  usuarioIdRecibe     Int?
+  comentario          String?
+  descripcionProblema String
+  fechaRecepcion      DateTime           @default(now())
+  estado              EstadoGarantia     @default(RECIBIDO)
+  creadoEn            DateTime           @default(now())
+  actualizadoEn       DateTime           @updatedAt
+  proveedorId         Int?
+  cliente             Cliente            @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  producto            Producto           @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  proveedor           Proveedor?         @relation(fields: [proveedorId], references: [id])
+  usuarioRecibe       Usuario?           @relation(fields: [usuarioIdRecibe], references: [id])
+  registros           RegistroGarantia[]
+}
+
+model RegistroGarantia {
+  id                 Int            @id @default(autoincrement())
+  garantiaId         Int
+  usuarioId          Int?
+  productoId         Int
+  estado             EstadoGarantia
+  conclusion         String?
+  accionesRealizadas String?
+  fechaRegistro      DateTime       @default(now())
+  proveedorId        Int?
+  garantia           Garantia       @relation(fields: [garantiaId], references: [id], onDelete: Cascade)
+  producto           Producto       @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  proveedor          Proveedor?     @relation(fields: [proveedorId], references: [id])
+  usuario            Usuario?       @relation(fields: [usuarioId], references: [id])
+}
+
+model Pago {
+  id         Int        @id @default(autoincrement())
+  ventaId    Int        @unique
+  monto      Float
+  metodoPago MetodoPago
+  fechaPago  DateTime   @default(now())
+  venta      Venta      @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+}
+
+model HistorialStock {
+  id               Int       @id @default(autoincrement())
+  productoId       Int?
+  empaqueId        Int?
+  cantidadAnterior Int
+  cantidadNueva    Int
+  fechaCambio      DateTime  @default(now())
+  empaque          Empaque?  @relation(fields: [empaqueId], references: [id], onDelete: Cascade)
+  producto         Producto? @relation(fields: [productoId], references: [id], onDelete: Cascade)
+}
+
+model Venta {
+  id                    Int             @id @default(autoincrement())
+  clienteId             Int?
+  fechaVenta            DateTime        @default(now())
+  horaVenta             DateTime        @default(now())
+  totalVenta            Float
+  sucursalId            Int
+  nombreClienteFinal    String?
+  telefonoClienteFinal  String?
+  direccionClienteFinal String?
+  imei                  String?
+  registroCajaId        Int?
+  usuarioId             Int?
+  metodoPago            Pago?
+  cliente               Cliente?        @relation(fields: [clienteId], references: [id])
+  registroCaja          RegistroCaja?   @relation(fields: [registroCajaId], references: [id])
+  sucursal              Sucursal        @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
+  usuario               Usuario?        @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  ventaCuota            VentaCuota?
+  productos             VentaProducto[]
+
+  @@unique([imei, id])
+}
+
+model TransferenciaProducto {
+  id                 Int      @id @default(autoincrement())
+  productoId         Int
+  cantidad           Int
+  sucursalOrigenId   Int
+  sucursalDestinoId  Int
+  fechaTransferencia DateTime @default(now())
+  usuarioEncargadoId Int?
+  producto           Producto @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  sucursalDestino    Sucursal @relation("SucursalDestino", fields: [sucursalDestinoId], references: [id], onDelete: Cascade)
+  sucursalOrigen     Sucursal @relation("SucursalOrigen", fields: [sucursalOrigenId], references: [id], onDelete: Cascade)
+  usuarioEncargado   Usuario? @relation(fields: [usuarioEncargadoId], references: [id])
+}
+
+model SolicitudTransferenciaProducto {
+  id                   Int                          @id @default(autoincrement())
+  productoId           Int
+  cantidad             Int
+  sucursalOrigenId     Int
+  sucursalDestinoId    Int
+  usuarioSolicitanteId Int?
+  estado               EstadoSolicitudTransferencia @default(PENDIENTE)
+  fechaSolicitud       DateTime                     @default(now())
+  fechaAprobacion      DateTime?
+  administradorId      Int?
+  administrador        Usuario?                     @relation("AdministradorAprobador", fields: [administradorId], references: [id])
+  producto             Producto                     @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  sucursalDestino      Sucursal                     @relation("SucursalDestinoSolicitud", fields: [sucursalDestinoId], references: [id], onDelete: Cascade)
+  sucursalOrigen       Sucursal                     @relation("SucursalOrigenSolicitud", fields: [sucursalOrigenId], references: [id], onDelete: Cascade)
+  usuarioSolicitante   Usuario?                     @relation("UsuarioSolicitante", fields: [usuarioSolicitanteId], references: [id])
+}
+
+model VentaProducto {
+  id          Int       @id @default(autoincrement())
+  ventaId     Int
+  productoId  Int?
+  cantidad    Int
+  creadoEn    DateTime  @default(now())
+  precioVenta Float
+  producto    Producto? @relation(fields: [productoId], references: [id])
+  venta       Venta     @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+}
+
+model Proveedor {
+  id               Int                @id @default(autoincrement())
+  nombre           String
+  correo           String?
+  telefono         String?
+  direccion        String?
+  razonSocial      String?
+  rfc              String?
+  nombreContacto   String?
+  telefonoContacto String?
+  emailContacto    String?
+  pais             String?
+  ciudad           String?
+  codigoPostal     String?
+  latitud          Float?
+  longitud         Float?
+  activo           Boolean            @default(true)
+  notas            String?
+  creadoEn         DateTime           @default(now())
+  actualizadoEn    DateTime           @updatedAt
+  entregasStock    EntregaStock[]
+  Garantia         Garantia[]
+  RegistroGarantia RegistroGarantia[]
+}
+
+model Categoria {
+  id        Int        @id @default(autoincrement())
+  nombre    String     @unique
+  productos Producto[] @relation("CategoriaToProducto")
+}
+
+model Departamento {
+  id         Int         @id @default(autoincrement())
+  nombre     String      @unique
+  clientes   Cliente[]
+  municipios Municipio[]
+}
+
+model Municipio {
+  id             Int          @id @default(autoincrement())
+  nombre         String       @unique
+  departamentoId Int
+  clientes       Cliente[]
+  departamento   Departamento @relation(fields: [departamentoId], references: [id], onDelete: Cascade)
 }
 
 enum EstadoReparacion {
   RECIBIDO
-  PENDIENTE       // El producto está registrado pero la reparación no ha comenzado
-  EN_PROCESO      // Reparación activa
-  ESPERANDO_PIEZAS // Reparación pausada por falta de piezas
-  REPARADO        // Reparación finalizada, listo para entrega
-  ENTREGADO       // Reparación completada y producto entregado al cliente
-  CANCELADO       // Reparación cancelada
-  NO_REPARABLE    // Producto no reparable tras diagnóstico
+  PENDIENTE
+  EN_PROCESO
+  ESPERANDO_PIEZAS
+  REPARADO
+  ENTREGADO
+  CANCELADO
+  NO_REPARABLE
   FINALIZADO
 }
-
-//============================>SALDOS Y OTROS
-
-model VentaCuota {
-  id                  Int          @id @default(autoincrement())
-  clienteId           Int          // Cliente relacionado
-  cliente             Cliente      @relation(fields: [clienteId], references: [id], onDelete: Cascade)
-  usuarioId           Int          // Usuario que autorizó la venta
-  usuario             Usuario      @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
-  sucursalId          Int          // Sucursal donde se realizó la venta
-  sucursal            Sucursal     @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
-  totalVenta          Float        // Monto total de la venta
-  cuotaInicial        Float        // Monto inicial pagado
-  cuotasTotales       Int          // Número total de cuotas
-  fechaInicio         DateTime     @default(now()) // Fecha en que se inició la venta a crédito
-  estado              EstadoCuota  @default(ACTIVA) // Enum para manejar el estado de la venta
-  cuotas              Cuota[]      // Relación con las cuotas individuales
-  // productos           VentaProducto[] // Relación con los productos vendidos
-  creadoEn            DateTime     @default(now())
-  actualizadoEn       DateTime     @updatedAt
-  dpi String
-  testigos Json
-  fechaContrato       DateTime     @default(now()) //
-  montoVenta          Float
-  garantiaMeses       Int
-  totalPagado         Float        @default(0)      // Total pagado hasta el momento (se actualizará con cada pago)
-  diasEntrePagos      Int          @default(0)  
-  interes             Int          @default(0)  // Porcentaje de interés aplicado al crédito (por ejemplo, 15 para 15%)
-  comentario String?
-  //
-  // Relación directa con la venta original
-  ventaId             Int?         @unique
-  venta               Venta?       @relation(fields: [ventaId], references: [id], onDelete: Cascade)
-  montoTotalConInteres Int?
-  //PAGOS QUE TIENE QUE HACER
-}
-
-
-model Cuota {
-  id                  Int          @id @default(autoincrement())
-  ventaCuotaId        Int          // Relación con la venta a cuotas
-  ventaCuota          VentaCuota   @relation(fields: [ventaCuotaId], references: [id], onDelete: Cascade)
-  monto               Float        // Monto de la cuota
-  fechaVencimiento    DateTime?     // Fecha en que debe realizarse el pago
-  fechaPago           DateTime?    //ya no es default, sino que la actualizaremos cuando hagamos el pago
-  estado              EstadoPago   @default(PENDIENTE) // Estado de la cuota
-  usuarioId           Int?         // Usuario que recibió el pago (null si no se ha pagado)
-  usuario             Usuario?     @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
-  creadoEn            DateTime     @default(now())
-  actualizadoEn       DateTime     @updatedAt
-  comentario String?
-  //1. MONTO QUE TIENE QUE PAGAR
-  montoEsperado Float?
-  // 2. Saldo pendiente (calculable)
-}
-
-
-
-model PlantillaComprobante {
-  id          Int        @id @default(autoincrement())
-  nombre      String     // Nombre o tipo de plantilla (Ej. "Plantilla Cuota Teléfonos")
-  texto       String     // Texto enriquecido de la plantilla (puede ser un string largo o HTML)
-  sucursalId  Int?
-  sucursal    Sucursal?  @relation(fields: [sucursalId], references: [id], onDelete: SetNull)
-  creadoEn    DateTime   @default(now())
-  actualizadoEn DateTime @updatedAt
-}
-
 
 enum EstadoPago {
   PENDIENTE
@@ -155,140 +746,14 @@ enum EstadoCuota {
   CANCELADA
 }
 
-//=============================================>
-
-model VentaEliminada {
-  id                 Int        @id @default(autoincrement())
-  usuarioId          Int        // ID del usuario que realizó la eliminación
-  usuario            Usuario    @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
-  motivo             String     // Motivo de la eliminación
-  totalVenta         Float      // Total de la venta
-  clienteId          Int?        // ID del usuario que realizó la eliminación
-  cliente            Cliente?    @relation(fields: [clienteId], references: [id], onDelete: SetNull)
-  fechaEliminacion   DateTime   @default(now()) // Fecha y hora de la eliminación
-  sucursalId         Int        // ID de la sucursal a la que pertenece la venta eliminada
-  sucursal           Sucursal   @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
-
-  VentaEliminadaProducto VentaEliminadaProducto[] // Relación con los productos de la venta eliminada
-}
-
-model VentaEliminadaProducto {
-  id                 Int         @id @default(autoincrement())
-  ventaEliminadaId   Int         // Relación con VentaEliminada
-  ventaEliminada     VentaEliminada @relation(fields: [ventaEliminadaId], references: [id], onDelete: Cascade)
-  productoId         Int?         // Relación con Producto
-  producto           Producto?    @relation(fields: [productoId], references: [id], onDelete: SetNull) // Permite que el producto sea eliminado sin romper la relación
-  cantidad           Int         // Cantidad del producto en la venta
-  precioVenta        Float       // Precio al que se vendió el producto
-  creadoEn           DateTime    @default(now()) // Fecha de creación del registro
-}
-
-model SucursalSaldo {
-  id                 Int         @id @default(autoincrement())
-  sucursalId         Int         @unique // Cada sucursal tiene un único saldo
-  sucursal           Sucursal    @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
-  saldoAcumulado     Float       @default(0) // Saldo acumulado de la sucursal PUEDE DISMINUIR-INCREMENTAR
-  totalIngresos      Float       @default(0) // Suma de todos los ingresos (ventas, depósitos)
-  totalEgresos       Float       @default(0) // Suma de todos los egresos
-  actualizadoEn      DateTime    @updatedAt
-}
-
-
-model RegistroCaja {
-  id                 Int             @id @default(autoincrement())
-  sucursalId         Int?             // Relación con la sucursal
-  sucursal           Sucursal?        @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
-  usuarioId          Int?            // Usuario responsable del registro
-  usuario            Usuario?        @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
-  saldoInicial       Float?           // Saldo del día anterior no depositado
-  // totalVentas        Float           @default(0) // Ventas realizadas durante el turno
-  // totalEgresos       Float           @default(0) // Suma de egresos realizados
-  saldoFinal         Float?           @default(0) // Saldo al cierre del turno
-  fechaInicio        DateTime?        @default(now()) // Inicio del turno
-  fechaCierre        DateTime?       @default(now()) // Inicio del turno
-  estado             EstadoCaja?      @default(ABIERTO) // Estado de la caja
-  depositos          Deposito[]      // Lista de depósitos realizados durante el turno
-  egresos            Egreso[]        // Lista de egresos realizados durante el turno
-  comentario         String?
-  ventas             Venta[]         // Ventas realizadas en este turno
-}
-
-model SucursalSaldoGlobal {
-  id                 Int         @id @default(autoincrement())
-  saldoGlobal        Float       @default(0) // Saldo total acumulado de todas las sucursales
-  totalIngresos      Float       @default(0) // Suma global de ingresos
-  totalEgresos       Float       @default(0) // Suma global de egresos
-  actualizadoEn      DateTime    @updatedAt
-}
-
-model Deposito {
-  id                 Int             @id @default(autoincrement())
-  registroCajaId     Int?            // Relación con el registro de caja
-  registroCaja       RegistroCaja?   @relation(fields: [registroCajaId], references: [id], onDelete: SetNull)
-  monto              Float
-  numeroBoleta       String
-  banco              String
-  fechaDeposito      DateTime        @default(now())
-  usadoParaCierre    Boolean         @default(false)
-  //VINCULAR CON LA SUCURSAL
-  descripcion String?
-  sucursalId     Int?            // Relación con el registro de caja
-  sucursal       Sucursal?   @relation(fields: [sucursalId], references: [id], onDelete: SetNull)
-  //DATOS DE QUIEN DEPOSITÓ
-  usuarioId          Int?            // Usuario responsable del registro
-  usuario            Usuario?        @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
-}
-
-model Egreso {
-  id                 Int             @id @default(autoincrement())
-  registroCajaId     Int?            // Relación con el registro de caja
-  registroCaja       RegistroCaja?   @relation(fields: [registroCajaId], references: [id], onDelete: SetNull)
-  descripcion        String?
-  monto              Float
-  fechaEgreso        DateTime        @default(now())
-  //VINCULAR CON LA SUCURSAL
-  sucursalId     Int?            // Relación con el registro de caja
-  sucursal       Sucursal?   @relation(fields: [sucursalId], references: [id], onDelete: SetNull)
-  //DATOS DE QUIEN REGISTRÓ
-  usuarioId          Int?            // Usuario responsable del registro
-  usuario            Usuario?        @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
-}
-
-
 enum EstadoCaja {
   ABIERTO
   CERRADO
 }
 
-//============================>
-
-model TicketSorteo {
-  id              Int       @id @default(autoincrement()) // ID único para cada sorteo
-  descripcionSorteo String?   // Descripción del sorteo, incluyendo detalles sobre premios
-  // fechaInicio     DateTime?  // Fecha y hora de inicio del sorteo
-  // fechaFinal      DateTime?  // Fecha y hora de finalización del sorteo
-  creadoEn        DateTime  @default(now()) // Fecha de creación del registro
-  actualizadoEn   DateTime  @updatedAt // Fecha de la última actualización
-  estado          EstadoTicket 
-}
-
 enum EstadoTicket {
-  ACTIVO         // El sorteo está en curso
-  INACTIVO     // El sorteo ha finalizado
-}
-
-model Vencimiento {
-  id                     Int          @id @default(autoincrement())
-  fechaVencimiento      DateTime     // Fecha de vencimiento
-  estado                 EstadoVencimiento @default(PENDIENTE) // Estado del vencimiento (pendiente, notificado, etc.)
-  descripcion            String?      // Descripción del vencimiento (opcional)
-  
-  // Relación con Stock
-  stockId               Int?         // Relación opcional con Stock
-  stock                 Stock?       @relation(fields: [stockId], references: [id], onDelete: SetNull)
-  // No es necesario incluir notificaciones aquí
-  fechaCreacion     DateTime           @default(now()) // Fecha de creación de la notificación
-
+  ACTIVO
+  INACTIVO
 }
 
 enum EstadoVencimiento {
@@ -297,369 +762,10 @@ enum EstadoVencimiento {
   RESUELTO
 }
 
-model Notificacion {
-  id                Int                @id @default(autoincrement())
-  mensaje           String             // Mensaje de la notificación
-  remitenteId       Int?               // Usuario que envía la notificación (opcional)
-  remitente         Usuario?           @relation("Remitente", fields: [remitenteId], references: [id])
-  tipoNotificacion  TipoNotificacion   // Tipo de notificación (enum)
-  referenciaId      Int?               // ID de referencia relacionado (por ejemplo, ID de solicitud o transferencia)
-  fechaCreacion     DateTime           @default(now()) // Fecha de creación de la notificación
-  notificacionesUsuarios NotificacionesUsuarios[]  // Relación con tabla intermedia
-
-  Usuario Usuario[] @relation("Destinatario")
-}
-
-
-model NotificacionesUsuarios {
-  id                Int                @id @default(autoincrement())
-  usuarioId         Int                // Usuario que recibe la notificación
-  usuario           Usuario            @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
-  notificacionId    Int                // ID de la notificación
-  notificacion      Notificacion       @relation(fields: [notificacionId], references: [id], onDelete: Cascade)
-  leido             Boolean            @default(false)  // Indica si la notificación fue leída
-  eliminado         Boolean            @default(false)  // Indica si la notificación fue eliminada
-  leidoEn           DateTime?                          // Fecha en que se leyó
-  recibidoEn        DateTime           @default(now())  // Fecha en que se recibió la notificación
-}
-
-
-model SolicitudPrecio {
-  id                Int         @id @default(autoincrement())
-  productoId        Int
-  producto          Producto    @relation(fields: [productoId], references: [id], onDelete: Cascade)
-  precioSolicitado  Float       // Precio solicitado por el vendedor
-  solicitadoPorId   Int         // Relación con el usuario que solicita el precio
-  solicitadoPor     Usuario     @relation("SolicitadoPor", fields: [solicitadoPorId], references: [id])
-  estado            EstadoSolicitud  @default(PENDIENTE)  // Estado de la solicitud
-  aprobadoPorId     Int?        // Admin que aprueba o rechaza la solicitud (nullable)
-  aprobadoPor       Usuario?    @relation("AprobadoPor", fields: [aprobadoPorId], references: [id])
-  fechaSolicitud    DateTime    @default(now())
-  fechaRespuesta    DateTime?   // Fecha cuando fue aprobada o rechazada
-}
-
-model Producto {
-  id                Int              @id @default(autoincrement())
-  nombre            String
-  descripcion       String?
-  stock             Stock[]          // Relación con Stock
-  categorias        Categoria[]      @relation(name: "CategoriaToProducto")
-  ventas            VentaProducto[]  // Relación con productos vendidos en varias ventas
-  codigoProducto    String           @unique  // NUEVO A APLICAR
-  creadoEn          DateTime         @default(now())
-  actualizadoEn     DateTime         @updatedAt
-  HistorialStock HistorialStock[]
-  HistorialPrecio HistorialPrecio[]
-  TransferenciaProducto TransferenciaProducto[]
-
-  precios           PrecioProducto[] // Relación con múltiples precios
-  SolicitudPrecio SolicitudPrecio[]
-
-  solicitudesTransferencia SolicitudTransferenciaProducto[]
-
-  precioCostoActual Float?
-
-  HistorialPrecioCosto HistorialPrecioCosto[]
-
-  AjusteStock AjusteStock[]
-
-  EliminacionProducto EliminacionProducto[]
-
-  EliminacionStock EliminacionStock[]
-  Garantia Garantia[]
-
-  RegistroGarantia RegistroGarantia[]
-
-  VentaEliminadaProducto VentaEliminadaProducto[]
-
-  Reparacion Reparacion[]
-  isDeleted         Boolean   @default(false)  // ← flag de borrado suave
-  deletedAt       DateTime?   
-}
-
-model Empaque {
-  id               Int       @id @default(autoincrement())
-  nombre           String
-  descripcion      String
-  codigoProducto   String    @unique
-  creadoEn         DateTime  @default(now())
-  actualizadoEn    DateTime  @updatedAt
-  precioCosto      Float?
-  precioVenta      Float?              
-  // Relaciones similares al producto
-  stock            Stock[]             // Stock por sucursal
-  HistorialStock   HistorialStock[]    // Control de movimientos
-  AjusteStock      AjusteStock[]       // Ajustes aplicados
-  EliminacionStock EliminacionStock[]
-
-  isDeleted         Boolean   @default(false)  // ← flag de borrado suave
-  deletedAt       DateTime? 
-}
-
-model HistorialPrecioCosto {
-  id                Int       @id @default(autoincrement())
-  productoId        Int
-  producto          Producto   @relation(fields: [productoId], references: [id], onDelete: Cascade)
-  precioCostoAnterior Float
-  precioCostoNuevo    Float
-  fechaCambio       DateTime  @default(now())
-  //========================================>
-  modificadoPorId     Int?
-  modificadoPor       Usuario?   @relation(fields: [modificadoPorId], references: [id], onDelete: Cascade) // Relación con Usuario
-}
-
-model PrecioProducto {
-  id                Int        @id @default(autoincrement())
-  productoId        Int?
-  producto          Producto?   @relation(fields: [productoId], references: [id], onDelete: Cascade)
-  precio            Float      // El precio de venta
-  creadoPorId       Int?        // El usuario que creó el precio (puede ser un vendedor)
-  creadoPor         Usuario?   @relation(fields: [creadoPorId], references: [id])
-  fechaCreacion     DateTime   @default(now())
-  // estado            EstadoPrecio  // Estado del precio: puede estar "APROBADO" o "PENDIENTE"
-  estado            EstadoPrecio  // Estado del precio: APROBADO, PENDIENTE, RECHAZADO
-  usado             Boolean     @default(false) // Para marcar si el precio ha sido utilizado
-  tipo              TipoPrecio // Puede ser 'CREADO_POR_SOLICITUD', 'ESTANDAR', etc.
-}
-
-model HistorialPrecio {
-  id              Int         @id @default(autoincrement())
-  productoId      Int
-  producto        Producto    @relation(fields: [productoId], references: [id], onDelete: Cascade)
-  precioAnterior  Float
-  precioNuevo     Float
-  fechaCambio     DateTime    @default(now())
-}
-
-model AjusteStock {
-  id               Int       @id @default(autoincrement())
-
-  productoId       Int?      // Opcional
-  producto         Producto? @relation(fields: [productoId], references: [id])
-  empaqueId        Int?      // Opcional
-  empaque          Empaque?  @relation(fields: [empaqueId], references: [id])
-
-  stockId          Int?      
-  stock            Stock?    @relation(fields: [stockId], references: [id])
-  cantidadAjustada Int
-  tipoAjuste       TipoAjuste
-  fechaHora        DateTime   @default(now())
-
-  usuarioId        Int?
-  usuario          Usuario?   @relation(fields: [usuarioId], references: [id])
-  descripcion      String?
-}
-
-model EliminacionStock {
-  id           Int       @id @default(autoincrement())
-
-  productoId   Int?
-  producto     Producto? @relation(fields: [productoId], references: [id])
-
-  empaqueId    Int?
-  empaque      Empaque?  @relation(fields: [empaqueId], references: [id])
-  fechaHora    DateTime  @default(now())
-
-  usuarioId    Int?
-  usuario      Usuario?  @relation(fields: [usuarioId], references: [id])
-
-  sucursalId   Int?
-  sucursal     Sucursal? @relation(fields: [sucursalId], references: [id])
-  motivo       String?
-}
-
 enum TipoAjuste {
   INCREMENTO
   DECREMENTO
   CORRECCION
-}
-
-model EliminacionProducto {
-  id           Int        @id @default(autoincrement())
-  producto     Producto   @relation(fields: [productoId], references: [id])
-  productoId   Int        // Referencia al producto eliminado
-  fechaHora    DateTime   @default(now())
-  usuario      Usuario?    @relation(fields: [usuarioId], references: [id])
-  usuarioId    Int?        // Usuario que realizó la eliminación
-  motivo       String?    // Razón de la eliminación (opcional)
-}
-
-model EliminacionCliente {
-  id           Int      @id @default(autoincrement())
-  cliente      Cliente  @relation(fields: [clienteId], references: [id])
-  clienteId    Int      // Referencia al cliente eliminado
-  fechaHora    DateTime @default(now())
-  usuario      Usuario?  @relation(fields: [usuarioId], references: [id])
-  usuarioId    Int?      // Usuario que realizó la eliminación
-  motivo       String?  // Razón de la eliminación (opcional)
-}
-
-model Stock {
-  id                Int         @id @default(autoincrement())
-  productoId        Int?        // OPCIONAL
-  producto          Producto?   @relation(fields: [productoId], references: [id], onDelete: Cascade)
-
-  empaqueId         Int?        // OPCIONAL
-  empaque           Empaque?    @relation(fields: [empaqueId], references: [id], onDelete: Cascade)
-
-  cantidadInicial    Int?        // Cantidad inicial de productos entregados
-  cantidad          Int
-  costoTotal        Float
-  creadoEn          DateTime     @default(now())
-  fechaIngreso      DateTime
-  fechaVencimiento  DateTime?
-  precioCosto       Float
-
-  sucursalId        Int
-  sucursal          Sucursal     @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
-
-  entregaStockId    Int?
-  entregaStock      EntregaStock? @relation(fields: [entregaStockId], references: [id], onDelete: SetNull)
-
-  Vencimiento       Vencimiento[]
-
-  AjusteStock       AjusteStock[]
-}
-
-model Sucursal {
-  id              Int         @id @default(autoincrement())
-  nombre          String      // Nombre de la sucursal
-  direccion       String?     // Dirección física de la sucursal
-  telefono        String?     // Teléfono de contacto
-  pbx             String?
-  productos       Stock[]     // Relación con el stock de productos de la sucursal
-  usuarios        Usuario[]   // Relación con los empleados de la sucursal
-  creadoEn        DateTime    @default(now())
-  actualizadoEn   DateTime    @updatedAt
-  tipoSucursal    TipoSucursal
-  estadoOperacion   Boolean   @default(true) // Activa o inactiva
-  Venta Venta[]
-  TransferenciaProducto TransferenciaProducto[] @relation("SucursalOrigen")
-  TransferenciaProductoDestino TransferenciaProducto[] @relation("SucursalDestino") // NUEVA RELACIÓN
-  EntregaStock EntregaStock[]
-  solicitudesOrigen    SolicitudTransferenciaProducto[] @relation("SucursalOrigenSolicitud")
-  solicitudesDestino   SolicitudTransferenciaProducto[] @relation("SucursalDestinoSolicitud")
-  EliminacionStock EliminacionStock[]
-  RegistroCaja RegistroCaja[]
-  Deposito Deposito[]
-  Egreso Egreso[]
-  SucursalSaldo SucursalSaldo?
-  VentaEliminada VentaEliminada[]
-
-  VentaCuota VentaCuota[]
-
-  PlantillaComprobante PlantillaComprobante[]
-
-  Reparacion Reparacion[]
-
-  MetaUsuario MetaUsuario[]
-
-  MetaCobros MetaCobros[]
-
-  DepositoCobro DepositoCobro[]
-}
-
-model EntregaStock {
-  id              Int         @id @default(autoincrement())
-  proveedorId     Int?        // Relación opcional con el proveedor
-  proveedor       Proveedor?  @relation(fields: [proveedorId], references: [id], onDelete: SetNull)
-  montoTotal      Float       // Monto total de la entrega (puede ser calculado sumando preciosCosto * cantidad)
-  fechaEntrega    DateTime    @default(now())
-  stockEntregado  Stock[]     // Relación con Stock
-  recibidoPorId   Int?        // Usuario que recibió la entrega (puede ser opcional)
-  usuarioRecibido Usuario?    @relation("UsuarioRecibido", fields: [recibidoPorId], references: [id], onDelete: SetNull)
-  //NUEVO
-  sucursalId      Int?         // NUEVO: Relación con la sucursal
-  sucursal        Sucursal?    @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
-  //DATOS PARA MANTENER INICIAL DATO
-}
-
-model Usuario {
-  id                    Int                @id @default(autoincrement())
-  nombre                String
-  rol                   Rol                // Rol del usuario
-  contrasena            String
-  activo                Boolean            @default(true)
-  entregasRecibidas     EntregaStock[]     @relation("UsuarioRecibido")
-  correo                String             @unique
-  sucursalId            Int                // Relación con la sucursal
-  sucursal              Sucursal           @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
-  TransferenciaProducto TransferenciaProducto[]
-  PrecioProducto        PrecioProducto[]
-  solicitudesPrecio     SolicitudPrecio[]  @relation("SolicitadoPor")
-  solicitudesAprobadas  SolicitudPrecio[]  @relation("AprobadoPor")
-  notificacionesEnviadas  Notificacion[] @relation("Remitente")
-  notificacionesRecibidas Notificacion[] @relation("Destinatario")
-  notificacionesUsuarios  NotificacionesUsuarios[]  // Relación con tabla intermedia
-  solicitudesEnviadas      SolicitudTransferenciaProducto[] @relation("UsuarioSolicitante")
-  solicitudesAprobadasTransferencia SolicitudTransferenciaProducto[] @relation("AdministradorAprobador") // Renombrada para especificidad
-  HistorialPrecioCosto HistorialPrecioCosto[]
-  AjusteStock AjusteStock[]
-  EliminacionProducto EliminacionProducto[]
-  EliminacionCliente EliminacionCliente[]
-  EliminacionStock EliminacionStock[]
-  RegistroGarantia RegistroGarantia[]
-  Garantia Garantia[]
-  RegistroCaja RegistroCaja[]
-  Deposito Deposito[]
-  Egreso Egreso[]
-  fecha_creacion        DateTime           @default(now()) // Aplica un valor por defecto a filas nuevas y existentes
-  fecha_actualizacion DateTime @default(now()) // Esto asigna automáticamente la fecha actual.
-
-  ventas             Venta[]            // Ventas realizadas por el usuario
-  VentaEliminada VentaEliminada[]
-
-  VentaCuota VentaCuota[]
-
-  Cuota Cuota[]
-
-  Reparacion Reparacion[]
-
-  RegistroReparacion RegistroReparacion[]
-
-  MetaUsuario MetaUsuario[]
-
-  MetaCobros MetaCobros[]
-
-  DepositoCobro DepositoCobro[]
-}
-
-model MetaUsuario {
-  id            Int       @id @default(autoincrement())
-  usuarioId     Int       // Relación con el usuario
-  usuario       Usuario    @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
-  sucursalId    Int       // Relación con la sucursal donde se establece la meta
-  sucursal      Sucursal   @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
-  fechaInicio   DateTime   @default(now())
-  fechaFin      DateTime   // Fin del plazo de la meta
-  montoMeta     Float      // Monto de ventas objetivo
-  montoActual   Float      @default(0) // Ventas acumuladas por el usuario dentro del plazo
-  cumplida      Boolean    @default(false) // Indica si la meta fue cumplida
-  fechaCumplida DateTime?  // Fecha en que se cumplió la meta, si aplica
-  numeroVentas  Float     // El numero de ventas hasta el momento
-  tituloMeta    String?
-  estado        EstadoMetaTienda
-  // @@index([usuarioId, sucursalId])
-}
-
-model MetaCobros {
-  id            Int       @id @default(autoincrement())
-  usuarioId     Int       // Relación con el usuario
-  usuario       Usuario    @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
-  sucursalId    Int       // Relación con la sucursal donde se establece la meta
-  sucursal      Sucursal   @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
-  fechaCreado   DateTime   @default(now()) // Fecha en que se creó la meta
-
-  fechaInicio   DateTime   @default(now())
-  fechaFin      DateTime   // Fin del plazo de la meta
-  montoMeta     Float      // Monto objetivo de cobros a alcanzar
-  montoActual   Float      @default(0) // Cobros acumulados por el usuario hasta ahora
-  cumplida      Boolean    @default(false) // Indica si la meta fue cumplida
-  fechaCumplida DateTime?  // Fecha en que se cumplió la meta, si aplica
-  numeroDepositos Int      @default(0) // Número de depósitos realizados hasta el momento
-  tituloMeta      String?
-  estado        EstadoMetaCobro
-  DepositoCobro DepositoCobro[]
 }
 
 enum EstadoMetaCobro {
@@ -674,249 +780,16 @@ enum EstadoMetaTienda {
   ABIERTO
   FINALIZADO
   CERRADO
-
 }
 
-model DepositoCobro {
-  id              Int       @id @default(autoincrement())
-  usuarioId       Int       // Relación con el usuario que hizo el depósito
-  usuario         Usuario    @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
-  sucursalId      Int       // Relación con la sucursal del depósito
-  sucursal        Sucursal   @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
-  numeroBoleta    String     // Número de boleta o comprobante del depósito
-  fechaRegistro   DateTime   @default(now()) // Fecha en la que se registró el depósito
-  montoDepositado Float      // Monto del depósito realizado
-  descripcion     String?    // Descripción o nota opcional sobre el depósito
-
-  metaCobroId     Int           // Relación con MetaCobros
-  metaCobro       MetaCobros     @relation(fields: [metaCobroId], references: [id], onDelete: Cascade) // Relación N:1 con MetaCobros
-}
-
-model Cliente {
-  id              Int          @id @default(autoincrement())
-  nombre          String
-  telefono        String?
-  direccion       String?
-  compras         Venta[]
-  creadoEn        DateTime     @default(now())
-  actualizadoEn   DateTime     @updatedAt
-  municipioId     Int?         // EN UBICACION TABLA
-  municipio       Municipio?   @relation(fields: [municipioId], references: [id], onDelete: SetNull) // EN UBICACION TABLA
-  departamentoId  Int?         // EN UBICACION TABLA
-  departamento    Departamento? @relation(fields: [departamentoId], references: [id], onDelete: SetNull) // EN UBICACION TABLA
-  EliminacionCliente EliminacionCliente[]
-  dpi             String?      // Campo DPI opcional
-  
-  @@unique([dpi, id]) // Índice compuesto que permite múltiples null en dpi
-  //PARA LAS GARANTÍAS
-  Garantia Garantia[]
-  iPInternet String? //IP PARA ENCONTRAR EL PAGO DE INTERNET
-    // Nuevas propiedades de fecha
-
-  VentaEliminada VentaEliminada[]
-  VentaCuota VentaCuota[]
-  Reparacion Reparacion[]
-}
-
-model Garantia {
-  id                 Int                @id @default(autoincrement())
-  //SELECCIONAR EL CLIENTE
-  clienteId          Int
-  cliente            Cliente            @relation(fields: [clienteId], references: [id], onDelete: Cascade)
-  //SELECCIONAR EL PRODUCTO
-  productoId         Int
-  producto           Producto           @relation(fields: [productoId], references: [id], onDelete: Cascade)
-  //USER QUE RECIBE
-  usuarioIdRecibe    Int?
-  usuarioRecibe      Usuario?            @relation(fields: [usuarioIdRecibe], references: [id], onDelete: SetNull)
-  //COMENTARIO
-  comentario         String?            // Comentario sobre el fallo
-  descripcionProblema String            // Descripción detallada del problema
-  fechaRecepcion     DateTime           @default(now())
-  estado             EstadoGarantia     @default(RECIBIDO)  // Estado inicial de la garantía
-  registros          RegistroGarantia[] // Relación con el historial de la garantía
-  creadoEn           DateTime           @default(now())
-  actualizadoEn      DateTime           @updatedAt
-  // REFERENCIAR AL PROVEEDOR
-    // Relación opcional con el proveedor
-  proveedorId        Int?               // ID del proveedor, opcional
-  proveedor          Proveedor?         @relation(fields: [proveedorId], references: [id], onDelete: SetNull)
-}
-
-model RegistroGarantia {
-  id                Int                @id @default(autoincrement())
-  garantiaId        Int
-  garantia          Garantia           @relation(fields: [garantiaId], references: [id], onDelete: Cascade)
-  // USUARIO QUE RECIBE
-  usuarioId         Int?
-  usuario           Usuario?            @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
-  // OTROS
-  // REFERENCIA AL PRODUCTO REPARADO O REEMPLAZADO
-  productoId        Int
-  producto          Producto           @relation(fields: [productoId], references: [id], onDelete: Cascade)
-  // USUARIO QUE RECIBE
-  estado            EstadoGarantia     // Estado en este punto del registro
-  // comentario        String?            // Comentario opcional sobre el estado o proceso
-  conclusion        String?            // Conclusión de la garantía (ej. Reparado, Reemplazado)
-  accionesRealizadas String?           // Acciones realizadas (opcional)
-  fechaRegistro     DateTime           @default(now())
-  // fechaFinalizacion DateTime?          // Fecha de finalización (opcional)
-  //REFERENCIAR AL PROVEEDOR
-    // Relación opcional con el proveedor
-  proveedorId        Int?               // ID del proveedor, opcional
-  proveedor          Proveedor?         @relation(fields: [proveedorId], references: [id], onDelete: SetNull)
-}
 enum EstadoGarantia {
-  RECIBIDO           // Producto recibido en garantía
-  ENVIADO_A_PROVEEDOR // Enviado a proveedor para reparación
-  EN_REPARACION       // Producto en reparación
-  REPARADO            // Reparación completada
-  REEMPLAZADO         //SE LE REEMPLAZARÁ EL PRODUCTO AL CLIENTE
-  ENTREGADO_CLIENTE   // Producto devuelto al cliente
-  CERRADO             // Caso cerrado
-}
-
-model Pago {
-  id              Int       @id @default(autoincrement())
-  ventaId         Int       @unique // Hacer que cada venta tenga solo un método de pago
-  venta           Venta     @relation(fields: [ventaId], references: [id], onDelete: Cascade)
-  monto           Float     // Monto pagado
-  metodoPago      MetodoPago // Usar el enum en lugar de String
-  fechaPago       DateTime  @default(now())
-}
-
-model HistorialStock {
-  id                Int       @id @default(autoincrement())
-  productoId        Int?      // opcional
-  producto          Producto? @relation(fields: [productoId], references: [id], onDelete: Cascade)
-
-  empaqueId         Int?      // opcional
-  empaque           Empaque?  @relation(fields: [empaqueId], references: [id], onDelete: Cascade)
-
-  cantidadAnterior  Int
-  cantidadNueva     Int
-  fechaCambio       DateTime  @default(now())
-}
-
-model Venta {
-  id              Int         @id @default(autoincrement())
-  clienteId       Int?        // Relación opcional con un cliente//ENVIAR:OPCIONAL
-  cliente         Cliente?    @relation(fields: [clienteId], references: [id], onDelete: SetNull)
-  fechaVenta      DateTime    @default(now())
-  horaVenta       DateTime    @default(now())
-  productos       VentaProducto[]//ENVIAR
-  totalVenta      Float       // Total de la venta//ENVIAR
-  metodoPago      Pago?       // Cambia esto para permitir null
-  sucursalId      Int         // NUEVO: Relación con la sucursal que hizo la venta
-  sucursal        Sucursal    @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
-  nombreClienteFinal String?
-  telefonoClienteFinal String?
-  direccionClienteFinal String?
-  imei                String?        
-  @@unique([imei, id]) // Permite null en `imei` sin conflicto de unicidad 
-  registroCajaId    Int?        // ID del turno de caja al que pertenece la venta
-  registroCaja      RegistroCaja? @relation(fields: [registroCajaId], references: [id], onDelete: SetNull)
-  // Relación opcional con una VentaCuota
-  ventaCuota          VentaCuota?
-  //relacion con venta opcional
-  usuarioId           Int?         // Relación con el usuario que realizó la venta
-  usuario             Usuario?     @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
-}
-
-model TransferenciaProducto {
-  id                Int         @id @default(autoincrement())
-  productoId        Int         // Producto que se transfiere
-  producto          Producto    @relation(fields: [productoId], references: [id], onDelete: Cascade)
-  cantidad          Int         // Cantidad de producto transferido
-  sucursalOrigenId  Int         // Sucursal de origen
-  sucursalOrigen    Sucursal    @relation("SucursalOrigen", fields: [sucursalOrigenId], references: [id], onDelete: Cascade)
-  sucursalDestinoId Int         // Sucursal de destino
-  sucursalDestino   Sucursal    @relation("SucursalDestino", fields: [sucursalDestinoId], references: [id], onDelete: Cascade)  // NUEVA RELACIÓN
-  fechaTransferencia DateTime   @default(now())
-  usuarioEncargadoId Int?        // Relación con el usuario que hace la transferencia
-  usuarioEncargado   Usuario?    @relation(fields: [usuarioEncargadoId], references: [id], onDelete: SetNull)
-}
-  
-  model SolicitudTransferenciaProducto {
-  id                    Int          @id @default(autoincrement())
-  productoId            Int          // ID del producto que se quiere transferir
-  producto              Producto     @relation(fields: [productoId], references: [id], onDelete: Cascade)
-  cantidad              Int          // Cantidad solicitada
-  sucursalOrigenId      Int          // Sucursal de origen de la solicitud
-  sucursalOrigen        Sucursal     @relation("SucursalOrigenSolicitud", fields: [sucursalOrigenId], references: [id], onDelete: Cascade)
-  sucursalDestinoId     Int          // Sucursal de destino de la solicitud
-  sucursalDestino       Sucursal     @relation("SucursalDestinoSolicitud", fields: [sucursalDestinoId], references: [id], onDelete: Cascade)
-  usuarioSolicitanteId  Int?          // Usuario que realiza la solicitud
-  usuarioSolicitante    Usuario?      @relation("UsuarioSolicitante", fields: [usuarioSolicitanteId], references: [id], onDelete: SetNull)
-  estado                EstadoSolicitudTransferencia @default(PENDIENTE) // Estado de la solicitud
-  fechaSolicitud        DateTime     @default(now())                    // Fecha de la solicitud
-  fechaAprobacion       DateTime?                                        // Fecha de aprobación o rechazo
-  administradorId       Int?         // Admin que aprueba/rechaza la solicitud
-  administrador         Usuario?     @relation("AdministradorAprobador", fields: [administradorId], references: [id], onDelete: SetNull)
-  // motivoRechazo         String?                                          // Motivo de rechazo, si es rechazado
-}
-
-model VentaProducto {
-  id              Int         @id @default(autoincrement())
-  ventaId         Int         // Relación con la venta
-  productoId      Int?         // Relación con el producto
-  cantidad        Int         // Cantidad vendida del producto
-  venta           Venta       @relation(fields: [ventaId], references: [id], onDelete: Cascade)
-  producto        Producto?    @relation(fields: [productoId], references: [id], onDelete: SetNull)
-  creadoEn        DateTime    @default(now())  // Fecha de creación del registro
-  //NUEVA PROPIEDAD QUE REGISTRA EL PRECIO AL QUE SE VENDIÓ EL PRODUCTO, SUSTITUTO DE DE PRECIOvENTA EN TABLA PRODUCTO
-  precioVenta     Float       // Precio de venta del producto en el momento de la venta
-  // VentaCuota VentaCuota[]
-}
-
-model Proveedor {
-  id              Int              @id @default(autoincrement())
-  nombre          String
-  correo          String?           
-  telefono        String?
-  direccion       String?
-  razonSocial     String?
-  rfc             String?
-  nombreContacto  String?
-  telefonoContacto String?
-  emailContacto   String?
-  pais            String?
-  ciudad          String?
-  codigoPostal    String?
-  latitud         Float?
-  longitud        Float?
-  entregasStock   EntregaStock[]
-  activo          Boolean          @default(true)
-  notas           String?
-  creadoEn        DateTime         @default(now())
-  actualizadoEn   DateTime         @updatedAt
-
-  // RegistroGarantia RegistroGarantia[]
-  //REFERNCIA AL PRIMER TICKET DE GARANTIA
-  Garantia Garantia[]
-  //REFERNCIA AL registro final
-  RegistroGarantia RegistroGarantia[]
-}
-
-model Categoria {
-  id              Int              @id @default(autoincrement())
-  nombre          String           @unique()
-  productos       Producto[]       @relation(name: "CategoriaToProducto")
-}
-
-model Departamento {
-  id              Int         @id @default(autoincrement())
-  nombre          String      @unique
-  municipios      Municipio[] // Relación con municipios
-  clientes        Cliente[]   // Relación con los clientes
-}
-
-model Municipio {
-  id              Int         @id @default(autoincrement())
-  nombre          String      @unique
-  departamentoId  Int
-  departamento    Departamento @relation(fields: [departamentoId], references: [id], onDelete: Cascade)
-  clientes        Cliente[]   // Relación con los clientes
+  RECIBIDO
+  ENVIADO_A_PROVEEDOR
+  EN_REPARACION
+  REPARADO
+  REEMPLAZADO
+  ENTREGADO_CLIENTE
+  CERRADO
 }
 
 enum Rol {
@@ -973,10 +846,8 @@ enum EstadoSolicitud {
   RECHAZADO
 }
 
-// Enum para el estado de las solicitudes de transferencia
 enum EstadoSolicitudTransferencia {
   PENDIENTE
   APROBADO
   RECHAZADO
 }
-  

@@ -2,16 +2,34 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 const port = process.env.PORT || 3000;
 
+//importar algo aqui VERGA-error
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  app.enableCors({
-    // origin: 'https://pos-ui-production.up.railway.app', // Cambia esta línea para permitir solo tu frontend
-    // origin: 'http://localhost:5173', // Cambia esta línea para permitir solo tu frontend
-    credentials: true,
-    origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-  });
+  // Habilitar CORS correctamente
+  const allowlist = new Set<string>([
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'http://localhost:5174',
+    'https://pos-crm-nova.up.railway.app',
+  ]);
 
+  app.enableCors({
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true); // curl/Postman sin Origin
+      return cb(null, allowlist.has(origin));
+    },
+    credentials: true, // con cookies
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Requested-With',
+      'X-Request-ID',
+    ],
+    exposedHeaders: ['Set-Cookie'],
+    preflightContinue: false,
+    optionsSuccessStatus: 204,
+  });
   await app.listen(port || 3000);
 }
 bootstrap();

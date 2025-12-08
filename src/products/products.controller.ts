@@ -75,11 +75,6 @@ export class ProductsController {
     @Param('id', ParseIntPipe) id: number,
     @Body() updateProductDto: UpdateProductDto,
   ) {
-    console.log(
-      'EN EL CONTROLLER NOS LLEGA EL PRODUCTO COMPLETO A EDITAR EL CUAL ES: ',
-      updateProductDto,
-    );
-
     return await this.productsService.update(id, updateProductDto);
   }
 

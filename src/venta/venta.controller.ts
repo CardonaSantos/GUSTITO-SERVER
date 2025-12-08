@@ -7,10 +7,12 @@ import {
   Param,
   Delete,
   ParseIntPipe,
+  Query,
 } from '@nestjs/common';
 import { VentaService } from './venta.service';
 import { CreateVentaDto } from './dto/create-venta.dto';
 import { UpdateVentaDto } from './dto/update-venta.dto';
+import { FindSucursalSalesDto } from './dto/find-sucursal-sales.dto';
 
 @Controller('venta')
 export class VentaController {
@@ -36,8 +38,11 @@ export class VentaController {
   }
 
   @Get('/find-my-sucursal-sales/:id')
-  async findAllSaleSucursal(@Param('id', ParseIntPipe) id: number) {
-    return await this.ventaService.findAllSaleSucursal(id);
+  async findAllSaleSucursal(
+    @Param('id', ParseIntPipe) id: number,
+    @Query() query: FindSucursalSalesDto,
+  ) {
+    return await this.ventaService.findAllSaleSucursal(id, query);
   }
 
   @Get('/get-ventas-caja/:id/:usuarioId')

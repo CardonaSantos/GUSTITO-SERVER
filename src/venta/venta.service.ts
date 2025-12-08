@@ -8,6 +8,8 @@ import { CreateVentaDto } from './dto/create-venta.dto';
 import { UpdateVentaDto } from './dto/update-venta.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { ClientService } from 'src/client/client.service';
+import { Prisma } from '@prisma/client';
+import { FindSucursalSalesDto } from './dto/find-sucursal-sales.dto';
 
 @Injectable()
 export class VentaService {
@@ -461,26 +463,150 @@ export class VentaService {
     }
   }
 
-  async findAllSaleSucursal(id: number) {
-    try {
-      const ventas = await this.prisma.venta.findMany({
-        where: {
-          sucursalId: id,
-        },
-        include: {
-          cliente: true,
-          metodoPago: true,
-          productos: {
-            include: {
-              producto: true,
+  async findAllSaleSucursal(id: number, query: FindSucursalSalesDto) {
+    const { page = 1, pageSize = 25, search, from, to } = query;
+
+    const safePage = page < 1 ? 1 : page;
+    const safePageSize = pageSize < 1 ? 25 : Math.min(pageSize, 200);
+
+    const skip = (safePage - 1) * safePageSize;
+    const take = safePageSize;
+
+    const where: Prisma.VentaWhereInput = {
+      sucursalId: id,
+    };
+
+    // 🔹 Rango de fechas (fechaVenta)
+    if (from || to) {
+      where.fechaVenta = {};
+      if (from) {
+        (where.fechaVenta as Prisma.DateTimeFilter).gte = new Date(from);
+      }
+      if (to) {
+        const toDate = new Date(to);
+        // Final del día
+        toDate.setHours(23, 59, 59, 999);
+        (where.fechaVenta as Prisma.DateTimeFilter).lte = toDate;
+      }
+    }
+
+    // 🔹 Búsqueda por texto (cliente, venta, nombre final, etc.)
+    if (search && search.trim().length > 0) {
+      const term = search.trim();
+      const numericSearch = Number(term);
+      const or: Prisma.VentaWhereInput['OR'] = [
+        // Cliente asociado
+        {
+          cliente: {
+            nombre: {
+              contains: term,
+              mode: 'insensitive',
             },
           },
         },
-        orderBy: {
-          fechaVenta: 'desc',
+        {
+          cliente: {
+            telefono: {
+              contains: term,
+              mode: 'insensitive',
+            },
+          },
         },
-      });
-      return ventas;
+        {
+          cliente: {
+            dpi: {
+              contains: term,
+              mode: 'insensitive',
+            },
+          },
+        },
+        {
+          cliente: {
+            direccion: {
+              contains: term,
+              mode: 'insensitive',
+            },
+          },
+        },
+        // Datos de cliente final
+        {
+          nombreClienteFinal: {
+            contains: term,
+            mode: 'insensitive',
+          },
+        },
+        {
+          telefonoClienteFinal: {
+            contains: term,
+            mode: 'insensitive',
+          },
+        },
+        {
+          direccionClienteFinal: {
+            contains: term,
+            mode: 'insensitive',
+          },
+        },
+      ];
+
+      if (!isNaN(numericSearch)) {
+        or.push(
+          { id: numericSearch },
+          {
+            cliente: {
+              id: numericSearch,
+            },
+          },
+        );
+      }
+
+      where.OR = or;
+    }
+
+    try {
+      // 1) Items paginados
+      // 2) Conteo total y suma totalVenta para el filtro (para summary)
+      const [items, aggregate] = await this.prisma.$transaction([
+        this.prisma.venta.findMany({
+          where,
+          include: {
+            cliente: true,
+            metodoPago: true,
+            productos: {
+              include: { producto: true },
+            },
+          },
+          orderBy: {
+            fechaVenta: 'desc',
+          },
+          skip,
+          take,
+        }),
+
+        this.prisma.venta.aggregate({
+          where,
+          _count: { _all: true },
+          _sum: { totalVenta: true },
+        }),
+      ]);
+
+      const totalItems = aggregate._count._all;
+      const totalPages =
+        totalItems === 0 ? 1 : Math.ceil(totalItems / safePageSize);
+
+      const totalInRange = aggregate._sum.totalVenta ?? 0;
+
+      return {
+        items,
+        page: safePage,
+        pageSize: safePageSize,
+        totalItems,
+        totalPages,
+        summary: {
+          totalInRange,
+          countInRange: totalItems,
+        },
+      };
     } catch (error) {
       console.error(error);
       throw new InternalServerErrorException('Error al obtener las ventas');
