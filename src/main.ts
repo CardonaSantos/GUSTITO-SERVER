@@ -9,7 +9,7 @@ async function bootstrap() {
   const allowlist = new Set<string>([
     'http://localhost:5173',
     'http://localhost:3000',
-    'http://localhost:5174',
+    'https://gustito-production.up.railway.app',
     'https://pos-crm-nova.up.railway.app',
   ]);
 
