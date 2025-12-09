@@ -7,6 +7,7 @@ import {
   Param,
   Delete,
   ParseIntPipe,
+  Query,
 } from '@nestjs/common';
 import { CajaService } from './caja.service';
 import { CreateCajaDto } from './dto/create-caja.dto';
@@ -25,17 +26,19 @@ export class CajaController {
     return this.cajaService.createCajaRegist(createCajaDto);
   }
 
-  //ABRIR EL REGISTRO DE CAJA [TURNO]
+  // caja.controller.ts
+
+  // ABRIR EL REGISTRO DE CAJA [TURNO]
   @Post('/open-cash-regist')
   createRegistCash(@Body() createCajaDto: OpenRegistDTO) {
     return this.cajaService.createRegistCash(createCajaDto);
   }
 
-  //CONSEGUIR REGISTRO DE CAJA SIN CERRAR
-  @Get('/find-cash-regist-open/:sucursalId/:userId')
+  // CONSEGUIR REGISTRO DE CAJA SIN CERRAR (por sucursal + usuario, vía query)
+  @Get('/find-cash-regist-open')
   findOpenCashRegist(
-    @Param('sucursalId', ParseIntPipe) sucursalId: number,
-    @Param('userId', ParseIntPipe) userId: number,
+    @Query('sucursalId', ParseIntPipe) sucursalId: number,
+    @Query('userId', ParseIntPipe) userId: number,
   ) {
     return this.cajaService.findOpenCashRegist(sucursalId, userId);
   }
@@ -84,8 +87,9 @@ export class CajaController {
     return this.cajaService.update(+id, updateCajaDto);
   }
 
-  @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.cajaService.remove(+id);
+  @Delete('delete-cash-register/:id')
+  async deleteCashRegister(@Param('id', ParseIntPipe) id: number) {
+    // Aquí podrías aplicar un guard de admin si quieres (RolesGuard, etc.)
+    return this.cajaService.deleteCashRegister(id);
   }
 }

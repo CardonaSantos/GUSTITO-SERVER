@@ -20,43 +20,104 @@ export class StockService {
     private readonly ajusteStock: AjusteStockService,
   ) {}
 
-  async create(createStockDto: StockEntryDTO) {
-    try {
-      const { proveedorId, stockEntries, sucursalId, recibidoPorId } =
-        createStockDto;
-
-      const costoStockEntrega = stockEntries.reduce(
-        (total, entry) => total + entry.cantidad * entry.precioCosto,
-        0,
+  // ==========================
+  // HELPERS PRIVADOS
+  // ==========================
+  private ensureBasePayload(
+    proveedorId?: number,
+    sucursalId?: number,
+    recibidoPorId?: number,
+    stockEntries?: { cantidad: number; precioCosto: number }[],
+  ) {
+    if (!proveedorId || !sucursalId || !recibidoPorId) {
+      throw new BadRequestException(
+        'Proveedor, sucursal y usuario receptor son obligatorios',
       );
+    }
 
-      const newRegistDeliveryStock = await this.prisma.entregaStock.create({
-        data: {
-          proveedorId: proveedorId,
-          montoTotal: costoStockEntrega,
-          recibidoPorId: recibidoPorId,
-          sucursalId: sucursalId,
-        },
-      });
+    if (!stockEntries || stockEntries.length === 0) {
+      throw new BadRequestException(
+        'Debe enviar al menos una entrada de stock',
+      );
+    }
 
-      // Crear registros de Stock asociados a la entrega
-      for (const entry of stockEntries) {
-        await this.prisma.stock.create({
+    const hasInvalidEntry = stockEntries.some(
+      (entry) =>
+        !entry ||
+        typeof entry.cantidad !== 'number' ||
+        typeof entry.precioCosto !== 'number' ||
+        entry.cantidad <= 0 ||
+        entry.precioCosto <= 0,
+    );
+
+    if (hasInvalidEntry) {
+      throw new BadRequestException(
+        'Todas las entradas de stock deben tener cantidad y precio de costo válidos (> 0)',
+      );
+    }
+  }
+
+  private calculateTotal(entries: { cantidad: number; precioCosto: number }[]) {
+    return entries.reduce(
+      (total, entry) => total + entry.cantidad * entry.precioCosto,
+      0,
+    );
+  }
+
+  // Normaliza fechas que llegan del UI (ISO string) a Date
+  private normalizeDate(value?: string | Date | null): Date | null {
+    if (!value) return null;
+    if (value instanceof Date) return value;
+    const date = new Date(value);
+    return isNaN(date.getTime()) ? null : date;
+  }
+
+  async create(createStockDto: StockEntryDTO) {
+    const { proveedorId, stockEntries, sucursalId, recibidoPorId } =
+      createStockDto;
+
+    // Validaciones básicas de payload
+    this.ensureBasePayload(
+      proveedorId,
+      sucursalId,
+      recibidoPorId,
+      stockEntries,
+    );
+
+    try {
+      const costoStockEntrega = this.calculateTotal(stockEntries);
+
+      const result = await this.prisma.$transaction(async (tx) => {
+        // 1) Crear entrega de stock
+        const entrega = await tx.entregaStock.create({
           data: {
-            productoId: entry.productoId,
-            cantidad: entry.cantidad,
-            costoTotal: entry.precioCosto * entry.cantidad,
-            fechaIngreso: entry.fechaIngreso,
-            fechaVencimiento: entry.fechaVencimiento,
-            precioCosto: entry.precioCosto,
-            entregaStockId: newRegistDeliveryStock.id, // Asociar con la entrega
-            sucursalId: sucursalId,
-            cantidadInicial: entry.cantidad,
+            proveedorId,
+            montoTotal: costoStockEntrega,
+            recibidoPorId,
+            sucursalId,
           },
         });
-      }
 
-      return newRegistDeliveryStock;
+        // 2) Crear stocks asociados (uno por cada entrada)
+        await tx.stock.createMany({
+          data: stockEntries.map((entry) => ({
+            productoId: entry.productoId,
+            cantidad: entry.cantidad,
+            cantidadInicial: entry.cantidad,
+            costoTotal: entry.cantidad * entry.precioCosto,
+            fechaIngreso: this.normalizeDate(entry.fechaIngreso),
+            fechaVencimiento: this.normalizeDate(entry.fechaVencimiento),
+            precioCosto: entry.precioCosto,
+            entregaStockId: entrega.id,
+            sucursalId,
+          })),
+        });
+
+        // Puedes devolver la entrega con info adicional si quieres
+        return entrega;
+      });
+
+      return result;
     } catch (error) {
       console.error('Error al crear la entrega de stock:', error);
       throw new InternalServerErrorException(
@@ -66,46 +127,49 @@ export class StockService {
   }
 
   async createEmpaqueStock(createStockDto: CreateEmpaqueStockDto) {
+    const { proveedorId, stockEntries, sucursalId, recibidoPorId } =
+      createStockDto;
+
+    this.ensureBasePayload(
+      proveedorId,
+      sucursalId,
+      recibidoPorId,
+      stockEntries,
+    );
+
     try {
-      const { proveedorId, stockEntries, sucursalId, recibidoPorId } =
-        createStockDto;
+      const costoTotalEntrega = this.calculateTotal(stockEntries);
 
-      // Calcular el costo total
-      const costoTotalEntrega = stockEntries.reduce(
-        (total, entry) => total + entry.cantidad * entry.precioCosto,
-        0,
-      );
-
-      // Crear el registro de entrega de stock
-      const newEntrega = await this.prisma.entregaStock.create({
-        data: {
-          proveedorId,
-          montoTotal: costoTotalEntrega,
-          recibidoPorId,
-          sucursalId,
-        },
-      });
-
-      // Registrar cada entrada de stock para empaque
-      for (const entry of stockEntries) {
-        const newStock = await this.prisma.stock.create({
+      const result = await this.prisma.$transaction(async (tx) => {
+        // 1) Crear entrega de stock
+        const entrega = await tx.entregaStock.create({
           data: {
-            empaqueId: entry.empaqueId, // <- importante
-            cantidad: entry.cantidad,
-            cantidadInicial: entry.cantidad,
-            costoTotal: entry.cantidad * entry.precioCosto,
-            fechaIngreso: new Date(entry.fechaIngreso),
-            fechaVencimiento: entry.fechaVencimiento
-              ? new Date(entry.fechaVencimiento)
-              : null,
-            precioCosto: entry.precioCosto,
-            entregaStockId: newEntrega.id,
+            proveedorId,
+            montoTotal: costoTotalEntrega,
+            recibidoPorId,
             sucursalId,
           },
         });
-      }
 
-      return newEntrega;
+        // 2) Crear registros de stock para empaques
+        await tx.stock.createMany({
+          data: stockEntries.map((entry) => ({
+            empaqueId: entry.empaqueId,
+            cantidad: entry.cantidad,
+            cantidadInicial: entry.cantidad,
+            costoTotal: entry.cantidad * entry.precioCosto,
+            fechaIngreso: this.normalizeDate(entry.fechaIngreso) ?? new Date(),
+            fechaVencimiento: this.normalizeDate(entry.fechaVencimiento),
+            precioCosto: entry.precioCosto,
+            entregaStockId: entrega.id,
+            sucursalId,
+          })),
+        });
+
+        return entrega;
+      });
+
+      return result;
     } catch (error) {
       console.error('Error al registrar stock de empaques:', error);
       throw new InternalServerErrorException(

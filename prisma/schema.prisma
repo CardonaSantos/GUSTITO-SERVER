@@ -132,6 +132,13 @@ model SucursalSaldo {
   actualizadoEn  DateTime @updatedAt
   sucursal       Sucursal @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
 }
+model SucursalSaldoGlobal {
+  id            Int      @id @default(autoincrement())
+  saldoGlobal   Float    @default(0)
+  totalIngresos Float    @default(0)
+  totalEgresos  Float    @default(0)
+  actualizadoEn DateTime @updatedAt
+}
 
 model RegistroCaja {
   id           Int         @id @default(autoincrement())
@@ -148,14 +155,6 @@ model RegistroCaja {
   sucursal     Sucursal?   @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
   usuario      Usuario?    @relation(fields: [usuarioId], references: [id])
   ventas       Venta[]
-}
-
-model SucursalSaldoGlobal {
-  id            Int      @id @default(autoincrement())
-  saldoGlobal   Float    @default(0)
-  totalIngresos Float    @default(0)
-  totalEgresos  Float    @default(0)
-  actualizadoEn DateTime @updatedAt
 }
 
 model Deposito {

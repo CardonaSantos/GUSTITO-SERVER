@@ -20,8 +20,6 @@ export class VentaController {
 
   @Post()
   async create(@Body() createVentaDto: CreateVentaDto) {
-    console.log('Los credenciales en controller son: ', createVentaDto);
-
     return await this.ventaService.create(createVentaDto);
   }
 

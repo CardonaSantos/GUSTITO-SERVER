@@ -15,34 +15,40 @@ export class ProductsService {
   async create(createProductDto: CreateNewProductDto) {
     try {
       const result = await this.prisma.$transaction(async (prisma) => {
-        // Crear el producto
+        // 1) Crear producto
         const newProduct = await prisma.producto.create({
           data: {
             precioCostoActual: createProductDto.precioCostoActual,
             codigoProducto: createProductDto.codigoProducto,
             nombre: createProductDto.nombre,
             descripcion: createProductDto.descripcion,
-            categorias: {
-              connect: createProductDto.categorias?.map((categoriaId) => ({
-                id: categoriaId,
-              })),
-            },
+            categorias: createProductDto.categorias?.length
+              ? {
+                  connect: createProductDto.categorias.map((categoriaId) => ({
+                    id: categoriaId,
+                  })),
+                }
+              : undefined,
           },
         });
 
-        // Crear precios de venta asociados al producto
+        // 2) Ordenar precios por orden (por si vienen desordenados)
+        const preciosOrdenados = [...createProductDto.precioVenta].sort(
+          (a, b) => a.orden - b.orden,
+        );
+
+        // 3) Crear precios de venta asociados
         const preciosCreados = await Promise.all(
-          createProductDto.precioVenta.map((precio) =>
+          preciosOrdenados.map((precioItem) =>
             prisma.precioProducto.create({
               data: {
                 producto: {
-                  connect: { id: newProduct.id }, // Relacionar con el producto recién creado
+                  connect: { id: newProduct.id },
                 },
-
-                precio: precio,
-                estado: 'APROBADO', // Se puede manejar el estado según lo requerido
+                precio: precioItem.precio,
+                orden: precioItem.orden, // 👈 usamos el orden del DTO
+                estado: 'APROBADO',
                 tipo: 'ESTANDAR',
-                // creadoPorId: createProductDto.creadoPorId, // El vendedor o usuario que lo creó (si es aplicable)
                 creadoPor: {
                   connect: {
                     id: createProductDto.creadoPorId,
@@ -53,12 +59,11 @@ export class ProductsService {
             }),
           ),
         );
-        console.log('el nuevo producto es: ', newProduct);
 
         return { newProduct, preciosCreados };
       });
 
-      return result; // Devuelve el producto y sus precios creados
+      return result;
     } catch (error) {
       console.error(error);
       throw new InternalServerErrorException(

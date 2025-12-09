@@ -2,26 +2,320 @@ import {
   BadRequestException,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { CreateVentaDto } from './dto/create-venta.dto';
 import { UpdateVentaDto } from './dto/update-venta.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { ClientService } from 'src/client/client.service';
-import { Prisma } from '@prisma/client';
+import { MetodoPago, Prisma } from '@prisma/client';
 import { FindSucursalSalesDto } from './dto/find-sucursal-sales.dto';
+
+type ProductoInput = {
+  productoId: number;
+  cantidad: number;
+  selectedPriceId: number;
+};
+
+type EmpaqueInput = {
+  id: number;
+  quantity: number;
+};
+
+type ProductoPreparado = ProductoInput & {
+  precioVenta: number;
+  tipoPrecio: string;
+};
 
 @Injectable()
 export class VentaService {
   //
+  private readonly logger = new Logger(VentaService.name);
   constructor(
     private readonly prisma: PrismaService,
     private readonly clienteService: ClientService, // Inyección del servicio Cliente
   ) {}
 
-  async createEx(createVentaDto: CreateVentaDto) {
+  // ⚠️ Un solo lugar para filtrar "caja abierta válida"
+  private async findCajaAbierta(
+    tx: Prisma.TransactionClient,
+    sucursalId: number,
+    usuarioId: number,
+  ): Promise<{ id: number } | null> {
+    const caja = await tx.registroCaja.findFirst({
+      where: {
+        sucursalId,
+        usuarioId,
+        estado: 'ABIERTO',
+        // si estás ya forzando fechaCierre = null al abrir, puedes dejar esto;
+        // si no, quítalo. Yo lo dejo porque ya lo corregiste arriba.
+        fechaCierre: null,
+      },
+      orderBy: {
+        fechaInicio: 'desc',
+      },
+      select: { id: true },
+    });
+
+    return caja ?? null;
+  }
+
+  // Versión estricta: se apoya en la anterior y lanza si no hay caja
+  private async getCajaAbiertaOrThrow(
+    tx: Prisma.TransactionClient,
+    sucursalId: number,
+    usuarioId: number,
+  ): Promise<{ id: number }> {
+    const caja = await this.findCajaAbierta(tx, sucursalId, usuarioId);
+
+    if (!caja) {
+      this.logger.warn(
+        `No se encontró caja abierta para sucursalId=${sucursalId}, usuarioId=${usuarioId} al crear venta`,
+      );
+      throw new BadRequestException(
+        'No hay un registro de caja abierto para este usuario en esta sucursal. No se puede registrar la venta.',
+      );
+    }
+
+    return caja;
+  }
+
+  // Versión opcional: para métodos exentos. NO lanza, solo devuelve null si no hay.
+  private async getCajaAbierta(
+    tx: Prisma.TransactionClient,
+    sucursalId: number,
+    usuarioId: number,
+  ): Promise<{ id: number } | null> {
+    return this.findCajaAbierta(tx, sucursalId, usuarioId);
+  }
+
+  // CREAR VENTA
+
+  private async getClienteConnect(
+    tx: Prisma.TransactionClient,
+    params: {
+      clienteId?: number;
+      nombre?: string;
+      dpi?: string;
+      telefono?: string;
+      direccion?: string;
+      iPInternet?: string;
+    },
+  ): Promise<{ connect: { id: number } } | undefined> {
+    const { clienteId, nombre, dpi, telefono, direccion, iPInternet } = params;
+
+    if (clienteId) {
+      return { connect: { id: clienteId } };
+    }
+
+    if (nombre && telefono) {
+      const nuevoCliente = await tx.cliente.create({
+        data: {
+          nombre,
+          dpi,
+          telefono,
+          direccion,
+          iPInternet,
+        },
+      });
+
+      this.logger.log(
+        `Cliente creado para venta. clienteId=${nuevoCliente.id}`,
+      );
+
+      return { connect: { id: nuevoCliente.id } };
+    }
+
+    // Cliente opcional: si no viene nada, la venta se crea sin cliente
+    return undefined;
+  }
+
+  private async prepararProductosYStock(
+    tx: Prisma.TransactionClient,
+    productos: ProductoInput[],
+    empaques: EmpaqueInput[] | undefined,
+    sucursalId: number,
+  ): Promise<{
+    productosFinal: ProductoPreparado[];
+    stockUpdates: { id: number; cantidad: number }[];
+  }> {
+    // 1) Traer precio y validar que no esté usado
+    const productosConPrecio: ProductoPreparado[] = [];
+
+    for (const prod of productos) {
+      const precioProducto = await tx.precioProducto.findUnique({
+        where: {
+          id: prod.selectedPriceId,
+        },
+      });
+
+      if (!precioProducto || precioProducto.usado) {
+        this.logger.warn(
+          `Precio inválido o ya usado para productoId=${prod.productoId}, precioId=${prod.selectedPriceId}`,
+        );
+        throw new BadRequestException(
+          `Precio inválido para el producto ${prod.productoId}`,
+        );
+      }
+
+      productosConPrecio.push({
+        ...prod,
+        precioVenta: precioProducto.precio,
+        tipoPrecio: precioProducto.tipo,
+      });
+    }
+
+    // 2) Consolidar productos repetidos por productoId
+    const productosFinal: ProductoPreparado[] = [];
+    for (const prod of productosConPrecio) {
+      const existente = productosFinal.find(
+        (p) => p.productoId === prod.productoId,
+      );
+      if (existente) {
+        existente.cantidad += prod.cantidad;
+      } else {
+        productosFinal.push({ ...prod });
+      }
+    }
+
+    const stockUpdates: { id: number; cantidad: number }[] = [];
+
+    // 3) Preparar descuento de stock para productos
+    for (const prod of productosFinal) {
+      let restante = prod.cantidad;
+
+      const stocks = await tx.stock.findMany({
+        where: {
+          productoId: prod.productoId,
+          sucursalId,
+        },
+        orderBy: {
+          fechaIngreso: 'asc',
+        },
+      });
+
+      for (const stock of stocks) {
+        if (restante <= 0) break;
+
+        if (stock.cantidad >= restante) {
+          stockUpdates.push({
+            id: stock.id,
+            cantidad: stock.cantidad - restante,
+          });
+          restante = 0;
+        } else {
+          stockUpdates.push({ id: stock.id, cantidad: 0 });
+          restante -= stock.cantidad;
+        }
+      }
+
+      if (restante > 0) {
+        this.logger.warn(
+          `Stock insuficiente para productoId=${prod.productoId} en sucursalId=${sucursalId}`,
+        );
+        throw new BadRequestException(
+          `Stock insuficiente para el producto ${prod.productoId}`,
+        );
+      }
+    }
+
+    // 4) Preparar descuento de stock para empaques (si aplica)
+    const empaquesValidos = (empaques ?? []).filter((e) => e.quantity > 0);
+
+    for (const pack of empaquesValidos) {
+      let restante = pack.quantity;
+
+      const stocks = await tx.stock.findMany({
+        where: {
+          empaqueId: pack.id,
+          sucursalId,
+        },
+        orderBy: {
+          fechaIngreso: 'asc',
+        },
+      });
+
+      for (const stock of stocks) {
+        if (restante <= 0) break;
+
+        if (stock.cantidad >= restante) {
+          stockUpdates.push({
+            id: stock.id,
+            cantidad: stock.cantidad - restante,
+          });
+          restante = 0;
+        } else {
+          stockUpdates.push({ id: stock.id, cantidad: 0 });
+          restante -= stock.cantidad;
+        }
+      }
+
+      if (restante > 0) {
+        this.logger.warn(
+          `Stock insuficiente para el empaqueId=${pack.id} en sucursalId=${sucursalId}`,
+        );
+        throw new BadRequestException(
+          `Stock insuficiente para el empaque con ID ${pack.id}`,
+        );
+      }
+    }
+
+    return { productosFinal, stockUpdates };
+  }
+
+  private async aplicarStock(
+    tx: Prisma.TransactionClient,
+    stockUpdates: { id: number; cantidad: number }[],
+  ) {
+    if (stockUpdates.length === 0) return;
+
+    await Promise.all(
+      stockUpdates.map((s) =>
+        tx.stock.update({
+          where: { id: s.id },
+          data: { cantidad: s.cantidad },
+        }),
+      ),
+    );
+  }
+
+  private calcularTotalVenta(productosFinal: ProductoPreparado[]): number {
+    return productosFinal.reduce(
+      (acc, p) => acc + p.precioVenta * p.cantidad,
+      0,
+    );
+  }
+
+  private async marcarPreciosEspeciales(
+    tx: Prisma.TransactionClient,
+    productosFinal: ProductoPreparado[],
+  ) {
+    const especiales = productosFinal.filter(
+      (p) => p.tipoPrecio === 'CREADO_POR_SOLICITUD',
+    );
+
+    if (especiales.length === 0) return;
+
+    await Promise.all(
+      especiales.map((prod) =>
+        tx.precioProducto.delete({
+          where: { id: prod.selectedPriceId },
+        }),
+      ),
+    );
+
+    this.logger.log(
+      `Precios especiales eliminados: ${especiales
+        .map((e) => e.selectedPriceId)
+        .join(', ')}`,
+    );
+  }
+
+  async create(createVentaDto: CreateVentaDto) {
     const {
       sucursalId,
+      usuarioId,
       clienteId,
       productos,
       metodoPago,
@@ -31,361 +325,106 @@ export class VentaService {
       direccion,
       imei,
       iPInternet,
+      empaques,
+      monto,
     } = createVentaDto;
 
-    console.log(
-      'LOS DATOS SEPARADOS DEL DTO ES: ',
-      sucursalId,
-      clienteId,
-      productos,
-      metodoPago,
-      nombre,
-      dpi,
-      telefono,
-      direccion,
-      imei,
+    if (!sucursalId || !usuarioId) {
+      throw new BadRequestException(
+        'sucursalId y usuarioId son requeridos para crear una venta',
+      );
+    }
+
+    if (!productos || productos.length === 0) {
+      throw new BadRequestException(
+        'Debe enviar al menos un producto para crear una venta',
+      );
+    }
+
+    this.logger.log(
+      `Intentando crear venta. sucursalId=${sucursalId}, usuarioId=${usuarioId}, metodoPago=${metodoPago}, productos=${productos.length}`,
     );
 
-    console.log('EL ID DEL SUCURSAL ES: ', sucursalId);
-
-    console.log('EL IP ES: ', iPInternet);
-
     try {
-      // 1. Crear o asociar cliente
-      let cliente;
-      if (clienteId) {
-        // Cliente ya existe
-        cliente = { connect: { id: clienteId } };
-      } else if (nombre && telefono) {
-        // Crear cliente nuevo
-        const nuevoCliente = await this.clienteService.create({
+      const venta = await this.prisma.$transaction(async (tx) => {
+        // 0) Regla: solo TARJETA y TRANSFERENCIA pueden vivir sin caja
+        const esPagoExentoDeCaja =
+          metodoPago === MetodoPago.TARJETA ||
+          metodoPago === MetodoPago.TRANSFERENCIA;
+
+        this.logger.log(
+          `Evaluando caja. metodoPago=${metodoPago}, esPagoExentoDeCaja=${esPagoExentoDeCaja}`,
+        );
+
+        let cajaAbierta: { id: number } | null = null;
+
+        if (esPagoExentoDeCaja) {
+          // Venta vía banco (no cash): caja NO es obligatoria,
+          // pero si hay una abierta, la ligamos igual.
+          cajaAbierta = await this.getCajaAbierta(tx, sucursalId, usuarioId);
+          if (!cajaAbierta) {
+            this.logger.log(
+              `Venta con metodoPago=${metodoPago} SIN caja abierta (permitido). sucursalId=${sucursalId}, usuarioId=${usuarioId}`,
+            );
+          } else {
+            this.logger.log(
+              `Venta con metodoPago=${metodoPago} ligada opcionalmente a cajaId=${cajaAbierta.id}`,
+            );
+          }
+        } else {
+          // CUALQUIER otra forma de pago (CONTADO, EFECTIVO, etc.) REQUIERE caja
+          cajaAbierta = await this.getCajaAbiertaOrThrow(
+            tx,
+            sucursalId,
+            usuarioId,
+          );
+        }
+
+        this.logger.log('Caja utilizada para la venta: ', cajaAbierta);
+
+        // 1) Cliente (existente o nuevo)
+        const clienteConnect = await this.getClienteConnect(tx, {
+          clienteId,
           nombre,
           dpi,
           telefono,
           direccion,
           iPInternet,
         });
-        cliente = { connect: { id: nuevoCliente.id } };
 
-        console.log('EL NUEVO CLIENTE CREADO ES: ', nuevoCliente);
-      } else {
-        // Caso de cliente final (CF)
-        cliente = undefined;
-      }
-
-      console.log('El nuevo cliente es: ', cliente);
-
-      // 2. Validación de productos y precios
-      const productosConsolidados = await Promise.all(
-        productos.map(async (prod) => {
-          const precioProducto = await this.prisma.precioProducto.findUnique({
-            where: { id: prod.selectedPriceId, productoId: prod.productoId },
-          });
-
-          if (!precioProducto || precioProducto.usado) {
-            throw new Error(
-              `El precio no está disponible para el producto ${prod.productoId}`,
-            );
-          }
-
-          return {
-            ...prod,
-            precioVenta: precioProducto.precio,
-            tipoPrecio: precioProducto.tipo,
-          };
-        }),
-      );
-
-      // 3. Consolidar productos
-      const productosConsolidadosFinales = productosConsolidados.reduce(
-        (acc, prod) => {
-          const existingProduct = acc.find(
-            (p) => p.productoId === prod.productoId,
+        // 2) Preparar productos + stock (incluye empaques)
+        const { productosFinal, stockUpdates } =
+          await this.prepararProductosYStock(
+            tx,
+            productos,
+            empaques,
+            sucursalId,
           );
-          if (existingProduct) {
-            existingProduct.cantidad += prod.cantidad;
-          } else {
-            acc.push(prod);
-          }
-          return acc;
-        },
-        [],
-      );
 
-      const stockUpdates = [];
+        // 3) Aplicar actualizaciones de stock
+        await this.aplicarStock(tx, stockUpdates);
 
-      // 4. Verificar disponibilidad de stock y preparar actualizaciones
-      for (const prod of productosConsolidadosFinales) {
-        const producto = await this.prisma.producto.findUnique({
-          where: { id: prod.productoId },
-        });
+        // 4) Calcular total de la venta
+        const totalVenta = this.calcularTotalVenta(productosFinal);
 
-        if (!producto) {
-          throw new Error(`Producto con ID ${prod.productoId} no encontrado`);
-        }
-
-        // Obtener registros de stock en la sucursal
-        const stocks = await this.prisma.stock.findMany({
-          where: { productoId: producto.id, sucursalId },
-          orderBy: { fechaIngreso: 'asc' },
-        });
-
-        let cantidadRestante = prod.cantidad;
-
-        for (const stock of stocks) {
-          if (cantidadRestante <= 0) break;
-
-          if (stock.cantidad >= cantidadRestante) {
-            stockUpdates.push({
-              id: stock.id,
-              cantidad: stock.cantidad - cantidadRestante,
-            });
-            cantidadRestante = 0;
-          } else {
-            stockUpdates.push({ id: stock.id, cantidad: 0 });
-            cantidadRestante -= stock.cantidad;
-          }
-        }
-
-        if (cantidadRestante > 0) {
-          throw new InternalServerErrorException(
-            `No hay suficiente stock para el producto ${producto.nombre}`,
+        if (monto && monto !== totalVenta) {
+          this.logger.warn(
+            `Monto enviado (${monto}) difiere del totalVenta calculado (${totalVenta}). Se usará el calculado.`,
           );
         }
-      }
 
-      // 5. Actualizar stock
-      await this.prisma.$transaction(
-        stockUpdates.map((stock) =>
-          this.prisma.stock.update({
-            where: { id: stock.id },
-            data: { cantidad: stock.cantidad },
-          }),
-        ),
-      );
-
-      // 6. Calcular total de la venta
-      const totalVenta = productosConsolidadosFinales.reduce(
-        (total, prod) => total + prod.precioVenta * prod.cantidad,
-        0,
-      );
-
-      // 7. Crear la venta con cliente y opción de IMEI
-      const venta = await this.prisma.venta.create({
-        data: {
-          cliente,
-          horaVenta: new Date(),
-          totalVenta,
-          imei,
-          sucursal: { connect: { id: sucursalId } },
-          productos: {
-            create: productosConsolidadosFinales.map((prod) => ({
-              producto: { connect: { id: prod.productoId } },
-              cantidad: prod.cantidad,
-              precioVenta: prod.precioVenta,
-            })),
-          },
-        },
-      });
-
-      const saldo = await this.prisma.sucursalSaldo.update({
-        where: {
-          sucursalId: sucursalId,
-        },
-        data: {
-          saldoAcumulado: {
-            //PRISMA INCREMENTA UN CAMPO ACUMULATIVO
-            increment: totalVenta,
-          },
-          totalIngresos: {
-            increment: totalVenta,
-          },
-        },
-      });
-
-      console.log('El registro actualizado es: ', saldo);
-
-      // 8. Marcar precios como usados si es necesario
-      await Promise.all(
-        productosConsolidadosFinales.map(async (prod) => {
-          if (prod.tipoPrecio === 'CREADO_POR_SOLICITUD') {
-            await this.prisma.precioProducto.delete({
-              where: { id: prod.selectedPriceId },
-            });
-          }
-        }),
-      );
-
-      // 9. Registro del pago
-      const payM = await this.prisma.pago.create({
-        data: {
-          metodoPago,
-          monto: venta.totalVenta,
-          venta: { connect: { id: venta.id } },
-        },
-      });
-
-      // Vincular el pago con la venta
-      await this.prisma.venta.update({
-        where: { id: venta.id },
-        data: { metodoPago: { connect: { id: payM.id } } },
-      });
-
-      console.log('La venta hecha es: ', venta);
-      return venta;
-    } catch (error) {
-      console.error(error);
-      throw new InternalServerErrorException('Error al crear la venta');
-    }
-  }
-
-  async create(createVentaDto: CreateVentaDto) {
-    const {
-      sucursalId,
-      clienteId,
-      productos,
-      metodoPago,
-      nombre,
-      dpi,
-      telefono,
-      direccion,
-      imei,
-      iPInternet,
-      usuarioId,
-      empaques,
-    } = createVentaDto;
-
-    try {
-      const result = await this.prisma.$transaction(async (prisma) => {
-        // 1. Crear o asociar cliente
-        let cliente;
-        if (clienteId) {
-          cliente = { connect: { id: clienteId } };
-        } else if (nombre && telefono) {
-          const nuevoCliente = await prisma.cliente.create({
-            data: { nombre, dpi, telefono, direccion, iPInternet },
-          });
-          cliente = { connect: { id: nuevoCliente.id } };
-        }
-
-        // 2. Consolidar productos con precios
-        const productosConsolidados = await Promise.all(
-          productos.map(async (prod) => {
-            const precioProducto = await prisma.precioProducto.findUnique({
-              where: { id: prod.selectedPriceId, productoId: prod.productoId },
-            });
-
-            if (!precioProducto || precioProducto.usado) {
-              throw new Error(
-                `Precio inválido para el producto ${prod.productoId}`,
-              );
-            }
-
-            return {
-              ...prod,
-              precioVenta: precioProducto.precio,
-              tipoPrecio: precioProducto.tipo,
-            };
-          }),
-        );
-
-        // 3. Consolidar cantidades de productos repetidos
-        const productosFinal = productosConsolidados.reduce((acc, prod) => {
-          const existente = acc.find((p) => p.productoId === prod.productoId);
-          if (existente) {
-            existente.cantidad += prod.cantidad;
-          } else {
-            acc.push(prod);
-          }
-          return acc;
-        }, []);
-
-        const stockUpdates: { id: number; cantidad: number }[] = [];
-
-        // 4. Verificar y preparar descuento de stock para productos
-        for (const prod of productosFinal) {
-          const stocks = await prisma.stock.findMany({
-            where: { productoId: prod.productoId, sucursalId },
-            orderBy: { fechaIngreso: 'asc' },
-          });
-
-          let restante = prod.cantidad;
-          for (const stock of stocks) {
-            if (restante <= 0) break;
-            if (stock.cantidad >= restante) {
-              stockUpdates.push({
-                id: stock.id,
-                cantidad: stock.cantidad - restante,
-              });
-              restante = 0;
-            } else {
-              stockUpdates.push({ id: stock.id, cantidad: 0 });
-              restante -= stock.cantidad;
-            }
-          }
-
-          if (restante > 0) {
-            throw new Error(
-              `Stock insuficiente para el producto ${prod.productoId}`,
-            );
-          }
-        }
-
-        // 5. Verificar y preparar descuento de stock para empaques (si se envió)
-        const empaquesValidos = (empaques ?? []).filter((e) => e.quantity > 0);
-
-        for (const pack of empaquesValidos) {
-          const stocks = await prisma.stock.findMany({
-            where: { empaqueId: pack.id, sucursalId },
-            orderBy: { fechaIngreso: 'asc' },
-          });
-
-          let restante = pack.quantity;
-          for (const stock of stocks) {
-            if (restante <= 0) break;
-            if (stock.cantidad >= restante) {
-              stockUpdates.push({
-                id: stock.id,
-                cantidad: stock.cantidad - restante,
-              });
-              restante = 0;
-            } else {
-              stockUpdates.push({ id: stock.id, cantidad: 0 });
-              restante -= stock.cantidad;
-            }
-          }
-
-          if (restante > 0) {
-            throw new Error(
-              `Stock insuficiente para el empaque con ID ${pack.id}`,
-            );
-          }
-        }
-
-        // 6. Actualizar stock en base a los cálculos previos
-        await Promise.all(
-          stockUpdates.map((s) =>
-            prisma.stock.update({
-              where: { id: s.id },
-              data: { cantidad: s.cantidad },
-            }),
-          ),
-        );
-
-        // 7. Crear venta y productos asociados
-        const totalVenta = productosFinal.reduce(
-          (acc, p) => acc + p.precioVenta * p.cantidad,
-          0,
-        );
-
-        const venta = await prisma.venta.create({
+        // 5) Crear venta ligada a usuario, sucursal y, si aplica, caja
+        const ventaCreada = await tx.venta.create({
           data: {
             usuario: { connect: { id: usuarioId } },
-            cliente,
+            sucursal: { connect: { id: sucursalId } },
+            ...(cajaAbierta && {
+              registroCaja: { connect: { id: cajaAbierta.id } },
+            }),
+            cliente: clienteConnect,
             horaVenta: new Date(),
             totalVenta,
             imei,
-            sucursal: { connect: { id: sucursalId } },
             productos: {
               create: productosFinal.map((prod) => ({
                 producto: { connect: { id: prod.productoId } },
@@ -396,8 +435,8 @@ export class VentaService {
           },
         });
 
-        // 8. Actualizar saldo de la sucursal
-        await prisma.sucursalSaldo.update({
+        // 6) Actualizar saldo de la sucursal
+        await tx.sucursalSaldo.update({
           where: { sucursalId },
           data: {
             saldoAcumulado: { increment: totalVenta },
@@ -405,40 +444,44 @@ export class VentaService {
           },
         });
 
-        // 9. Marcar precios especiales como usados
-        await Promise.all(
-          productosFinal.map(async (prod) => {
-            if (prod.tipoPrecio === 'CREADO_POR_SOLICITUD') {
-              await prisma.precioProducto.delete({
-                where: { id: prod.selectedPriceId },
-              });
-            }
-          }),
-        );
+        // 7) Marcar precios especiales como usados / eliminar
+        await this.marcarPreciosEspeciales(tx, productosFinal);
 
-        // 10. Registrar pago
-        const pago = await prisma.pago.create({
+        // 8) Registrar pago
+        const pago = await tx.pago.create({
           data: {
             metodoPago,
-            monto: venta.totalVenta,
-            venta: { connect: { id: venta.id } },
+            monto: ventaCreada.totalVenta,
+            venta: { connect: { id: ventaCreada.id } },
           },
         });
 
-        await prisma.venta.update({
-          where: { id: venta.id },
+        await tx.venta.update({
+          where: { id: ventaCreada.id },
           data: { metodoPago: { connect: { id: pago.id } } },
         });
 
-        return venta;
+        return ventaCreada;
       });
 
-      return result;
+      this.logger.log(`Venta creada correctamente. ventaId=${venta.id}`);
+
+      return venta;
     } catch (error) {
-      console.error(error);
+      this.logger.error(
+        `Error al crear la venta: ${error.message}`,
+        error.stack,
+      );
+
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+
       throw new InternalServerErrorException('Error al crear la venta');
     }
   }
+
+  // CREAR VENTA
 
   async findAll() {
     try {

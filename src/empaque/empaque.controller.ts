@@ -23,7 +23,12 @@ export class EmpaqueController {
 
   @Get('')
   findAll() {
-    return this.empaqueService.findAll();
+    return this.empaqueService.findAllVenta();
+  }
+
+  @Get('inventario')
+  getAllForInventario() {
+    return this.empaqueService.findAllInventario();
   }
 
   @Get('/find-empaques-stock')
@@ -34,6 +39,11 @@ export class EmpaqueController {
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.empaqueService.findOne(+id);
+  }
+
+  @Patch('toggle-active/:id')
+  async toggleActiveEmpaque(@Param('id', ParseIntPipe) id: number) {
+    return this.empaqueService.toggleActiveEmpaque(id);
   }
 
   @Patch(':id')

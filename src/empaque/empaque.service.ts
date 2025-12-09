@@ -3,6 +3,7 @@ import {
   HttpException,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { CreateEmpaqueDto } from './dto/create-empaque.dto';
@@ -13,6 +14,7 @@ import { Stock } from 'src/stock/entities/stock.entity';
 @Injectable()
 export class EmpaqueService {
   constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(EmpaqueService.name);
 
   async create(createEmpaqueDto: CreateEmpaqueDto) {
     return await this.prisma.empaque.create({
@@ -26,7 +28,7 @@ export class EmpaqueService {
     });
   }
 
-  async findAll() {
+  async findAllVenta() {
     const empaques = await this.prisma.empaque.findMany({
       where: {
         isDeleted: false,
@@ -57,6 +59,47 @@ export class EmpaqueService {
       codigoProducto: empaque.codigoProducto,
       precioCosto: empaque.precioCosto,
       precioVenta: empaque.precioVenta,
+      activo: empaque.isDeleted,
+      stock: empaque.stock.map((stock) => ({
+        id: stock.id,
+        cantidad: stock.cantidad,
+        fechaIngreso: stock.fechaIngreso,
+        sucursal: {
+          id: stock.sucursal.id,
+          nombre: stock.sucursal.nombre,
+        },
+      })),
+    }));
+  }
+
+  async findAllInventario() {
+    const empaques = await this.prisma.empaque.findMany({
+      include: {
+        stock: {
+          where: {
+            cantidad: {
+              gt: 0, //greaten than > mayo que cero, no quiero esos xD
+            },
+          },
+          include: {
+            sucursal: true,
+          },
+        },
+      },
+    });
+
+    if (!empaques) {
+      throw new NotFoundException(`Empaques no encontrados.`);
+    }
+
+    return empaques.map((empaque) => ({
+      id: empaque.id,
+      nombre: empaque.nombre,
+      descripcion: empaque.descripcion,
+      codigoProducto: empaque.codigoProducto,
+      precioCosto: empaque.precioCosto,
+      precioVenta: empaque.precioVenta,
+      activo: empaque.isDeleted,
       stock: empaque.stock.map((stock) => ({
         id: stock.id,
         cantidad: stock.cantidad,
@@ -71,6 +114,9 @@ export class EmpaqueService {
 
   async fin_empaques_stock() {
     const empaques = await this.prisma.empaque.findMany({
+      where: {
+        isDeleted: false,
+      },
       include: {
         stock: {
           where: {
@@ -171,5 +217,50 @@ export class EmpaqueService {
     // return await this.prisma.empaque.delete({
     //   where: { id },
     // });
+  }
+
+  /**
+   * Alterna el estado lógico del empaque:
+   * - Si está activo (isDeleted = false) -> se desactiva (isDeleted = true, deletedAt = ahora)
+   * - Si está desactivado (isDeleted = true) -> se reactiva (isDeleted = false, deletedAt = null)
+   */
+  async toggleActiveEmpaque(id: number) {
+    try {
+      const empaque = await this.prisma.empaque.findUnique({
+        where: { id },
+      });
+
+      if (!empaque) {
+        this.logger.warn(`Empaque no encontrado para toggle. id=${id}`);
+        throw new NotFoundException('Empaque no encontrado');
+      }
+
+      const nuevoIsDeleted = !empaque.isDeleted;
+
+      const updated = await this.prisma.empaque.update({
+        where: { id },
+        data: {
+          isDeleted: nuevoIsDeleted,
+          deletedAt: nuevoIsDeleted ? new Date() : null,
+        },
+      });
+
+      this.logger.log(
+        `Empaque ${id} toggled. isDeleted: ${empaque.isDeleted} -> ${nuevoIsDeleted}`,
+      );
+
+      return updated;
+    } catch (error) {
+      this.logger.error(
+        `Error al alternar estado de empaque id=${id}: ${error.message}`,
+        error.stack,
+      );
+
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+
+      throw new BadRequestException('No se pudo cambiar el estado del empaque');
+    }
   }
 }

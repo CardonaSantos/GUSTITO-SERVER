@@ -1,23 +1,53 @@
-import { IsArray, IsNumber, IsOptional, IsString } from 'class-validator';
+import {
+  IsArray,
+  IsInt,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsPositive,
+  IsString,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
+
+export class PrecioVentaItemDto {
+  @IsNumber()
+  @IsPositive()
+  precio: number;
+
+  @IsInt()
+  @IsPositive()
+  orden: number;
+}
 
 export class CreateNewProductDto {
   @IsString()
-  nombre: string; // Nombre del producto
+  @IsNotEmpty()
+  nombre: string;
 
   @IsString()
-  codigoProducto: string; // Código único del producto
+  @IsNotEmpty()
+  codigoProducto: string;
 
   @IsString()
-  descripcion: string; // Código único del producto
+  @IsNotEmpty()
+  descripcion: string;
 
   @IsNumber()
-  precioVenta: number[]; // Precio de venta del producto
+  @IsPositive()
+  precioCostoActual: number;
+
   @IsNumber()
+  @IsPositive()
   creadoPorId: number;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PrecioVentaItemDto)
+  precioVenta: PrecioVentaItemDto[];
+
   @IsArray()
   @IsOptional()
-  categorias?: number[]; // IDs de categorías asociadas (opcional)
-
-  @IsNumber()
-  precioCostoActual: number;
+  @IsInt({ each: true })
+  categorias?: number[];
 }
