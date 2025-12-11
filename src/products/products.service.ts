@@ -112,6 +112,11 @@ export class ProductsService {
       const productos = await this.prisma.producto.findMany({
         include: {
           precios: {
+            where: {
+              tipo: 'ESTANDAR',
+              usado: false,
+              estado: 'APROBADO',
+            },
             select: {
               id: true,
               precio: true,
@@ -206,6 +211,11 @@ export class ProductsService {
         include: {
           categorias: true,
           precios: {
+            where: {
+              tipo: 'ESTANDAR',
+              usado: false,
+              estado: 'APROBADO',
+            },
             select: {
               id: true,
               precio: true,
