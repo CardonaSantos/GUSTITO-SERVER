@@ -80,7 +80,6 @@ export class ProductsService {
             where: {
               estado: 'APROBADO',
               usado: false,
-              tipo: 'ESTANDAR',
             },
           },
           stock: {
