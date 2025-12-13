@@ -36,7 +36,7 @@ export class PriceRequestController {
     @Param('idSolicitud', ParseIntPipe) idSolicitud: number,
     @Param('idUser', ParseIntPipe) idUser: number,
   ) {
-    return this.priceRequestService.aceptPriceRequest(idSolicitud, idUser);
+    return this.priceRequestService.acceptPriceRequest(idSolicitud, idUser);
   }
 
   @Patch('/reject-request-price/:idSolicitud/:idUser')

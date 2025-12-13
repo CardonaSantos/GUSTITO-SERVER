@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   InternalServerErrorException,
+  Logger,
 } from '@nestjs/common';
 import { CreatePriceRequestDto } from './dto/create-price-request.dto';
 import { UpdatePriceRequestDto } from './dto/update-price-request.dto';
@@ -10,6 +11,7 @@ import { NotificationService } from 'src/notification/notification.service';
 
 @Injectable()
 export class PriceRequestService {
+  private readonly logger = new Logger(PriceRequestService.name);
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationService: NotificationService,
@@ -89,77 +91,113 @@ export class PriceRequestService {
     }
   }
 
-  async aceptPriceRequest(idSolicitud: number, idUser: number) {
+  async acceptPriceRequest(idSolicitud: number, idUser: number) {
+    const logger = new Logger('PriceRequestService');
+
     try {
-      console.log('idsolicitud: ', idSolicitud);
-      console.log('idUser: ', idUser);
+      // 1) Transacción DB (igual que tu versión que sí emitía)
+      const result = await this.prisma.$transaction(async (tx) => {
+        // A) Traer solicitud PENDIENTE
+        const solicitud = await tx.solicitudPrecio.findFirst({
+          where: {
+            id: idSolicitud,
+            estado: 'PENDIENTE',
+          },
+          select: {
+            id: true,
+            productoId: true,
+            precioSolicitado: true,
+            solicitadoPorId: true,
+          },
+        });
 
-      // Buscar la solicitud en estado PENDIENTE
-      const solicitudPendiente = await this.prisma.solicitudPrecio.findFirst({
-        where: {
-          id: idSolicitud,
-          // estado: 'PENDIENTE',
-        },
-        include: { producto: true },
+        if (!solicitud) {
+          throw new BadRequestException(
+            'Solicitud no encontrada o ya procesada',
+          );
+        }
+
+        // B) CALCULAR ORDEN: MAX(orden) + 1  ✅ (nunca negativo)
+        //    Si no hay precios o todos tienen orden null -> toma 0 y queda 1
+        const maxOrdenAgg = await tx.precioProducto.aggregate({
+          where: { productoId: solicitud.productoId },
+          _max: { orden: true },
+        });
+
+        const maxOrden = maxOrdenAgg._max.orden ?? 0;
+        const nextOrden = maxOrden + 1;
+
+        logger.log(
+          `[acceptPriceRequest] productoId=${solicitud.productoId} maxOrden=${maxOrden} nextOrden=${nextOrden}`,
+        );
+
+        // C) Marcar solicitud como APROBADO
+        const solicitudAprobada = await tx.solicitudPrecio.update({
+          where: { id: solicitud.id },
+          data: {
+            estado: 'APROBADO',
+            fechaRespuesta: new Date(),
+            aprobadoPorId: idUser,
+          },
+        });
+
+        // D) Crear precio con orden correcto
+        const nuevoPrecio = await tx.precioProducto.create({
+          data: {
+            estado: 'APROBADO',
+            precio: solicitudAprobada.precioSolicitado,
+            creadoPorId: idUser,
+            productoId: solicitudAprobada.productoId,
+            tipo: 'CREADO_POR_SOLICITUD',
+            orden: nextOrden, // ✅ 1,2,3 -> 4
+          },
+        });
+
+        // E) Borrar solicitud (igual que tu versión “sí socket”)
+        await tx.solicitudPrecio.delete({
+          where: { id: solicitudAprobada.id },
+        });
+
+        return { solicitudAprobada, nuevoPrecio };
       });
 
-      if (!solicitudPendiente) {
-        throw new BadRequestException('Solicitud no encontrada o ya aprobada');
-      }
+      // 2) Notificación / socket (igual que tu versión “sí socket”)
+      //    IMPORTANTE: dejamos logs antes/después para confirmar que se ejecuta.
+      try {
+        const producto = await this.prisma.producto.findUnique({
+          where: { id: result.solicitudAprobada.productoId },
+          select: { nombre: true },
+        });
 
-      // Actualizar el estado de la solicitud a APROBADO
-      const solicitudAprobada = await this.prisma.solicitudPrecio.update({
-        where: { id: solicitudPendiente.id },
-        data: {
-          estado: 'APROBADO',
-          fechaRespuesta: new Date(),
-          aprobadoPorId: idUser,
-        },
-      });
+        logger.log(
+          `[acceptPriceRequest] creando notificación para solicitadoPorId=${result.solicitudAprobada.solicitadoPorId}`,
+        );
 
-      console.log('La solicitud aprobada es: ', solicitudAprobada);
-
-      const productoId = solicitudPendiente.producto.id; // Recuperamos el productoId de la solicitud
-
-      // Crear el nuevo precio asociado al producto
-      const nuevoPrecio = await this.prisma.precioProducto.create({
-        data: {
-          estado: 'APROBADO',
-          precio: solicitudAprobada.precioSolicitado,
-          creadoPorId: idUser,
-          productoId: productoId,
-          tipo: 'CREADO_POR_SOLICITUD',
-        },
-      });
-
-      console.log('Nuevo precio creado: ', nuevoPrecio);
-
-      const producto = await this.prisma.producto.findUnique({
-        where: {
-          id: solicitudAprobada.productoId,
-        },
-      });
-
-      // Crear la notificación para el usuario que hizo la solicitud
-      const nuevaNotificacion =
-        await this.notificationService.createOneNotification(
-          `Un administrador ha aceptado tu solicitud de precio para el producto "${producto.nombre}"`,
-          idUser,
-          solicitudAprobada.solicitadoPorId,
+        const notif = await this.notificationService.createOneNotification(
+          `Un administrador ha aceptado tu solicitud de precio para el producto "${producto?.nombre ?? ''}"`,
+          idUser, // emisor
+          result.solicitudAprobada.solicitadoPorId, // receptor (quien solicitó)
           'SOLICITUD_PRECIO',
         );
-      console.log('Notificación de confirmación: ', nuevaNotificacion);
 
-      // Borrar la solicitud procesada para que no vuelva a aparecer
-      const solicitudBorrada = await this.prisma.solicitudPrecio.delete({
-        where: { id: solicitudAprobada.id },
-      });
+        logger.log(
+          `[acceptPriceRequest] notificación creada id=${(notif as any)?.id ?? 'N/A'} (socket debería emitirse aquí)`,
+        );
+      } catch (notifyErr) {
+        // Si aquí truena, el socket no va a salir: esto lo deja CLARÍSIMO en logs
+        logger.error(
+          `[acceptPriceRequest] Error enviando notificación/socket: ${notifyErr?.message ?? notifyErr}`,
+          notifyErr?.stack,
+        );
+      }
 
-      console.log('La solicitud borrada es: ', solicitudBorrada);
-      // return { solicitudAprobada, nuevoPrecio, nuevaNotificacion };
+      return result;
     } catch (error) {
       console.error(error);
-      throw new BadRequestException('Error al procesar la solicitud de precio');
+      if (error instanceof BadRequestException) throw error;
+      throw new InternalServerErrorException(
+        'Error al procesar la solicitud de precio',
+      );
     }
   }
 

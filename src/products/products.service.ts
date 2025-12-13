@@ -112,7 +112,6 @@ export class ProductsService {
         include: {
           precios: {
             where: {
-              tipo: 'ESTANDAR',
               usado: false,
               estado: 'APROBADO',
             },
@@ -211,7 +210,6 @@ export class ProductsService {
           categorias: true,
           precios: {
             where: {
-              tipo: 'ESTANDAR',
               usado: false,
               estado: 'APROBADO',
             },
