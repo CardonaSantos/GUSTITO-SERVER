@@ -277,27 +277,115 @@ export class CajaService {
         }
 
         // 3) Si HAY caja abierta, calculamos resumen de movimientos
-        const [ventasAgg, egresosAgg, depositosAgg, depositosCierreAgg] =
-          await Promise.all([
-            tx.venta.aggregate({
-              where: { registroCajaId: registro.id },
-              _sum: { totalVenta: true },
-            }),
-            tx.egreso.aggregate({
-              where: { registroCajaId: registro.id },
-              _sum: { monto: true },
-            }),
-            tx.deposito.aggregate({
-              where: { registroCajaId: registro.id },
-              _sum: { monto: true },
-            }),
-            tx.deposito.aggregate({
-              where: {
-                registroCajaId: registro.id,
+        const [
+          ventasAgg,
+          egresosAgg,
+          depositosAgg,
+          ventas,
+          egresos,
+          depositos,
+        ] = await Promise.all([
+          tx.venta.aggregate({
+            where: { registroCajaId: registro.id },
+            _sum: { totalVenta: true },
+          }),
+          tx.egreso.aggregate({
+            where: { registroCajaId: registro.id },
+            _sum: { monto: true },
+          }),
+
+          tx.deposito.aggregate({
+            where: {
+              registroCajaId: registro.id,
+            },
+            _sum: { monto: true },
+          }),
+
+          // VENTAS
+          tx.venta.findMany({
+            where: {
+              registroCajaId: registro.id,
+            },
+            select: {
+              id: true,
+              clienteId: true,
+              fechaVenta: true,
+              horaVenta: true,
+              totalVenta: true,
+              sucursalId: true,
+              nombreClienteFinal: true,
+              telefonoClienteFinal: true,
+              direccionClienteFinal: true,
+              imei: true,
+              registroCajaId: true,
+              productos: {
+                select: {
+                  cantidad: true,
+                  producto: {
+                    select: {
+                      id: true,
+                      nombre: true,
+                      codigoProducto: true,
+                    },
+                  },
+                },
               },
-              _sum: { monto: true },
-            }),
-          ]);
+            },
+          }),
+          // EGRESOS
+          tx.egreso.findMany({
+            where: {
+              registroCajaId: registro.id,
+            },
+            select: {
+              id: true,
+              registroCajaId: true,
+              descripcion: true,
+              monto: true,
+              fechaEgreso: true,
+              sucursalId: true,
+              usuarioId: true,
+              usuario: {
+                select: {
+                  id: true,
+                  nombre: true,
+                  rol: true,
+                },
+              },
+            },
+          }),
+          // DEPOSITOS
+          tx.deposito.findMany({
+            where: {
+              registroCajaId: registro.id,
+            },
+            select: {
+              id: true,
+              registroCajaId: true,
+              monto: true,
+              numeroBoleta: true,
+              banco: true,
+              fechaDeposito: true,
+              usadoParaCierre: true,
+              descripcion: true,
+              sucursalId: true,
+              usuarioId: true,
+              usuario: {
+                select: {
+                  id: true,
+                  nombre: true,
+                  rol: true,
+                },
+              },
+              sucursal: {
+                select: {
+                  id: true,
+                  nombre: true,
+                },
+              },
+            },
+          }),
+        ]);
 
         const saldoInicial = registro.saldoInicial ?? 0;
         const totalVentas = ventasAgg._sum.totalVenta ?? 0;
@@ -334,6 +422,10 @@ export class CajaService {
             ...registro,
             resumen,
           },
+          ventas: ventas,
+          depositos: depositos,
+          egresos: egresos,
+
           ultimaCajaCerrada: null,
         };
       });
@@ -767,6 +859,7 @@ export class CajaService {
           this.logger.warn(
             `Intento de eliminar registro de caja inexistente. id=${id}`,
           );
+
           throw new NotFoundException('Registro de caja no encontrado');
         }
 
@@ -833,6 +926,36 @@ export class CajaService {
       throw new InternalServerErrorException(
         'Error al eliminar el registro de caja',
       );
+    }
+  }
+
+  async deleteDeposito(id: number) {
+    try {
+      if (!id) throw new BadRequestException('Registro no proporcionado');
+
+      const registToDelete = await this.prisma.deposito.delete({
+        where: {
+          id,
+        },
+      });
+      return registToDelete;
+    } catch (error) {
+      this.logger.error(error);
+    }
+  }
+
+  async deleteEgreso(id: number) {
+    try {
+      if (!id) throw new BadRequestException('Registro no proporcionado');
+
+      const registToDelete = await this.prisma.egreso.delete({
+        where: {
+          id,
+        },
+      });
+      return registToDelete;
+    } catch (error) {
+      this.logger.error(error);
     }
   }
 }
