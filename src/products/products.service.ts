@@ -72,6 +72,39 @@ export class ProductsService {
     }
   }
 
+  // async findAllProductsToSale(id: number) {
+  //   try {
+  //     const productos = await this.prisma.producto.findMany({
+  //       include: {
+  //         precios: {
+  //           where: {
+  //             estado: 'APROBADO',
+  //             usado: false,
+  //           },
+  //         },
+  //         stock: {
+  //           where: {
+  //             cantidad: {
+  //               gt: 0, // Solo traer productos con stock disponible
+  //             },
+  //             sucursalId: id,
+  //           },
+  //           select: {
+  //             id: true,
+  //             cantidad: true,
+  //             fechaIngreso: true,
+  //             fechaVencimiento: true,
+  //           },
+  //         },
+  //       },
+  //     });
+
+  //     return productos;
+  //   } catch (error) {
+  //     console.error('Error en findAll productos:', error); // Proporcionar más contexto en el error
+  //     throw new InternalServerErrorException('Error al obtener los productos');
+  //   }
+  // }
   async findAllProductsToSale(id: number) {
     try {
       const productos = await this.prisma.producto.findMany({
@@ -81,12 +114,12 @@ export class ProductsService {
               estado: 'APROBADO',
               usado: false,
             },
+            orderBy: {
+              orden: 'asc',
+            },
           },
           stock: {
             where: {
-              cantidad: {
-                gt: 0, // Solo traer productos con stock disponible
-              },
               sucursalId: id,
             },
             select: {
@@ -101,7 +134,7 @@ export class ProductsService {
 
       return productos;
     } catch (error) {
-      console.error('Error en findAll productos:', error); // Proporcionar más contexto en el error
+      console.error('Error en findAll productos:', error);
       throw new InternalServerErrorException('Error al obtener los productos');
     }
   }
