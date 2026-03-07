@@ -269,6 +269,8 @@ model Producto {
   VentaEliminadaProducto   VentaEliminadaProducto[]
   ventas                   VentaProducto[]
   categorias               Categoria[]                      @relation("CategoriaToProducto")
+
+  movimientoStocks MovimientoStock[]
 }
 
 model Empaque {
@@ -286,6 +288,8 @@ model Empaque {
   EliminacionStock EliminacionStock[]
   HistorialStock   HistorialStock[]
   stock            Stock[]
+
+  movimientoStocks MovimientoStock[]
 }
 
 model HistorialPrecioCosto {
@@ -391,6 +395,8 @@ model Stock {
   producto         Producto?     @relation(fields: [productoId], references: [id], onDelete: Cascade)
   sucursal         Sucursal      @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
   Vencimiento      Vencimiento[]
+
+  movimientoStocks MovimientoStock[]
 }
 
 model Sucursal {
@@ -423,6 +429,8 @@ model Sucursal {
   Venta                        Venta[]
   VentaCuota                   VentaCuota[]
   VentaEliminada               VentaEliminada[]
+
+  movimientoStocks MovimientoStock[]
 }
 
 model EntregaStock {
@@ -436,6 +444,8 @@ model EntregaStock {
   usuarioRecibido Usuario?   @relation("UsuarioRecibido", fields: [recibidoPorId], references: [id])
   sucursal        Sucursal?  @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
   stockEntregado  Stock[]
+
+  movimientoStocks MovimientoStock[]
 }
 
 model Usuario {
@@ -478,6 +488,8 @@ model Usuario {
   VentaCuota                        VentaCuota[]
   VentaEliminada                    VentaEliminada[]
   notificacionesRecibidas           Notificacion[]                   @relation("Destinatario")
+
+  movimientoStocks MovimientoStock[]
 }
 
 model MetaUsuario {
@@ -630,6 +642,7 @@ model Venta {
   productos             VentaProducto[]
 
   @@unique([imei, id])
+  movimientoStocks MovimientoStock[]
 }
 
 model TransferenciaProducto {
@@ -699,6 +712,62 @@ model Proveedor {
   Garantia         Garantia[]
   RegistroGarantia RegistroGarantia[]
 }
+
+
+model MovimientoStock {
+  id               Int                  @id @default(autoincrement())
+
+  // ¿QUÉ se movió?
+  stockId          Int?                 // el registro específico de stock afectado
+  productoId       Int?                 // para filtrar por producto fácilmente
+  empaqueId        Int?                 // si aplica a empaque
+
+  // ¿QUÉ pasó?
+  tipoMovimiento   TipoMovimientoStock  // enum: ver abajo
+  cantidadAnterior Int                  // cantidad ANTES del movimiento
+  cantidadNueva    Int                  // cantidad DESPUÉS
+  delta            Int                  // diferencia: puede ser negativa o positiva
+
+  // ¿QUIÉN lo hizo?
+  usuarioId        Int?                 // quién ejecutó la acción
+  sucursalId       Int?                 // en qué sucursal ocurrió
+
+  // ¿DESDE DÓNDE vino?
+  // FK opcionales para trazar el origen exacto
+  ventaId          Int?                 // si vino de una venta
+  entregaStockId   Int?                 // si vino de un ingreso de stock
+  ajusteStockId    Int?                 // si vino de un ajuste manual
+  transferenciaId  Int?                 // si vino de una transferencia
+
+  // ¿CONTEXTO adicional?
+  descripcion      String?              // texto libre, ej: "Ajuste por conteo físico"
+  origenModulo     String?              // ej: "StockService.create", "VentaService"
+
+  fechaMovimiento  DateTime             @default(now())
+  actualizadoEn     DateTime @updatedAt
+  creadoEn          DateTime @default(now())
+
+  // Relaciones
+  stock            Stock?               @relation(fields: [stockId], references: [id], onDelete: SetNull)
+  producto         Producto?            @relation(fields: [productoId], references: [id], onDelete: SetNull)
+  empaque          Empaque?             @relation(fields: [empaqueId], references: [id], onDelete: SetNull)
+  usuario          Usuario?             @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+  sucursal         Sucursal?            @relation(fields: [sucursalId], references: [id], onDelete: SetNull)
+  venta            Venta?               @relation(fields: [ventaId], references: [id], onDelete: SetNull)
+  entregaStock     EntregaStock?        @relation(fields: [entregaStockId], references: [id], onDelete: SetNull)
+}
+
+enum TipoMovimientoStock {
+  INGRESO          // stock creado vía entrega de proveedor
+  VENTA            // descuento por venta
+  AJUSTE_MANUAL    // via AjusteStock (manual por admin)
+  TRANSFERENCIA    // movimiento entre sucursales
+  ELIMINACION      // stock eliminado manualmente
+  CORRECCION       // corrección sin categoría clara
+}
+
+
+
 
 model Categoria {
   id        Int        @id @default(autoincrement())
