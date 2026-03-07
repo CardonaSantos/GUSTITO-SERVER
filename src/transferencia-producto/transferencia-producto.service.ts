@@ -1,14 +1,35 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+} from '@nestjs/common';
 import { CreateTransferenciaProductoDto } from './dto/create-transferencia-producto.dto';
 import { UpdateTransferenciaProductoDto } from './dto/update-transferencia-producto.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { NotificationService } from 'src/notification/notification.service';
+import { TipoMovimientoStock } from '@prisma/client';
+import { MovimientoStockService } from 'src/registrar-movimiento/registrar-movimiento.service';
+
+// Tipo interno para capturar los datos necesarios para auditoría
+// fuera de la transacción
+type MovimientoParaAuditoria = {
+  stockId: number;
+  productoId?: number;
+  cantidadAnterior: number;
+  cantidadNueva: number;
+  sucursalId: number;
+  esOrigen: boolean; // true = descuento, false = ingreso en destino
+};
 
 @Injectable()
 export class TransferenciaProductoService {
+  private readonly logger = new Logger(TransferenciaProductoService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationService: NotificationService,
+    private readonly movimientoStock: MovimientoStockService, // ← inyectado
   ) {}
 
   create(createTransferenciaProductoDto: CreateTransferenciaProductoDto) {
@@ -24,84 +45,176 @@ export class TransferenciaProductoService {
       usuarioEncargadoId,
     } = dto;
 
-    // Verificar que hay suficiente stock en la sucursal de origen sumando todos los registros disponibles
-    const stockOrigenes = await this.prisma.stock.findMany({
-      where: { productoId, sucursalId: sucursalOrigenId },
-      orderBy: { fechaIngreso: 'asc' }, // Ordenar por fechaIngreso para aplicar FIFO
-    });
+    // Capturamos los movimientos para auditarlos fuera de la tx
+    let movimientosParaAuditoria: MovimientoParaAuditoria[] = [];
+    let transferenciaId: number;
 
-    // Calcular la cantidad total disponible en la sucursal de origen
-    const cantidadTotalStockOrigen = stockOrigenes.reduce(
-      (total, stock) => total + stock.cantidad,
-      0,
-    );
-
-    if (cantidadTotalStockOrigen < cantidad) {
-      throw new Error('Stock insuficiente en la sucursal de origen');
-    }
-
-    let cantidadRestante = cantidad;
-
-    // FIFO
-    for (const stock of stockOrigenes) {
-      if (cantidadRestante === 0) break;
-
-      if (stock.cantidad <= cantidadRestante) {
-        // Si el stock actual es menor o igual a la cantidad requerida, restar todo el stock
-        await this.prisma.stock.update({
-          where: { id: stock.id },
-          data: { cantidad: 0 }, // Consumir todo este registro de stock
+    try {
+      // ── Transacción: todo o nada ────────────────────────────────────────
+      // 🔴 FIX: antes no había transacción — si fallaba a mitad del FIFO
+      // el stock origen quedaba decrementado sin que el destino recibiera nada
+      const resultado = await this.prisma.$transaction(async (tx) => {
+        // 1) Verificar stock suficiente en origen
+        const stockOrigenes = await tx.stock.findMany({
+          where: { productoId, sucursalId: sucursalOrigenId },
+          orderBy: { fechaIngreso: 'asc' }, // FIFO
         });
-        cantidadRestante -= stock.cantidad;
-      } else {
-        // Si el stock actual es mayor a la cantidad requerida, restar solo lo necesario
-        await this.prisma.stock.update({
-          where: { id: stock.id },
-          data: { cantidad: stock.cantidad - cantidadRestante },
+
+        const cantidadTotalOrigen = stockOrigenes.reduce(
+          (total, s) => total + s.cantidad,
+          0,
+        );
+
+        if (cantidadTotalOrigen < cantidad) {
+          throw new BadRequestException(
+            'Stock insuficiente en la sucursal de origen',
+          );
+        }
+
+        // 2) FIFO — decrementar stock origen
+        let cantidadRestante = cantidad;
+        const movimientosOrigen: MovimientoParaAuditoria[] = [];
+
+        for (const stock of stockOrigenes) {
+          if (cantidadRestante === 0) break;
+
+          const cantidadAnterior = stock.cantidad;
+          let cantidadNueva: number;
+
+          if (stock.cantidad <= cantidadRestante) {
+            cantidadNueva = 0;
+            cantidadRestante -= stock.cantidad;
+          } else {
+            cantidadNueva = stock.cantidad - cantidadRestante;
+            cantidadRestante = 0;
+          }
+
+          await tx.stock.update({
+            where: { id: stock.id },
+            data: { cantidad: cantidadNueva },
+          });
+
+          // Capturamos para auditar después
+          movimientosOrigen.push({
+            stockId: stock.id,
+            productoId: productoId,
+            cantidadAnterior,
+            cantidadNueva,
+            sucursalId: sucursalOrigenId,
+            esOrigen: true,
+          });
+        }
+
+        // 3) Incrementar o crear stock en destino
+        const stockDestino = await tx.stock.findFirst({
+          where: { productoId, sucursalId: sucursalDestinoId },
         });
-        cantidadRestante = 0; // Ya no queda más cantidad por transferir
-      }
-    }
 
-    // Buscar o crear el stock en la sucursal de destino
-    const stockDestino = await this.prisma.stock.findFirst({
-      where: { productoId, sucursalId: sucursalDestinoId },
-    });
+        let movimientoDestino: MovimientoParaAuditoria;
 
-    if (stockDestino) {
-      // Si ya existe el stock del producto en la sucursal destino, sumamos la cantidad
-      await this.prisma.stock.update({
-        where: { id: stockDestino.id },
-        data: { cantidad: stockDestino.cantidad + cantidad },
+        if (stockDestino) {
+          const cantidadAnterior = stockDestino.cantidad;
+          const cantidadNueva = stockDestino.cantidad + cantidad;
+
+          await tx.stock.update({
+            where: { id: stockDestino.id },
+            data: { cantidad: cantidadNueva },
+          });
+
+          movimientoDestino = {
+            stockId: stockDestino.id,
+            productoId,
+            cantidadAnterior,
+            cantidadNueva,
+            sucursalId: sucursalDestinoId,
+            esOrigen: false,
+          };
+        } else {
+          const nuevoStock = await tx.stock.create({
+            data: {
+              productoId,
+              sucursalId: sucursalDestinoId,
+              cantidad,
+              precioCosto: stockOrigenes[0].precioCosto,
+              costoTotal: stockOrigenes[0].precioCosto * cantidad,
+              fechaIngreso: new Date(),
+            },
+          });
+
+          movimientoDestino = {
+            stockId: nuevoStock.id,
+            productoId,
+            cantidadAnterior: 0,
+            cantidadNueva: cantidad,
+            sucursalId: sucursalDestinoId,
+            esOrigen: false,
+          };
+        }
+
+        // 4) Registrar la transferencia
+        const transferencia = await tx.transferenciaProducto.create({
+          data: {
+            productoId,
+            cantidad,
+            sucursalOrigenId,
+            sucursalDestinoId,
+            usuarioEncargadoId,
+            fechaTransferencia: new Date(),
+          },
+        });
+
+        return {
+          transferencia,
+          movimientosOrigen,
+          movimientoDestino,
+        };
       });
-    } else {
-      // Si no existe, creamos un nuevo registro de stock en la sucursal destino
-      await this.prisma.stock.create({
-        data: {
-          productoId,
-          sucursalId: sucursalDestinoId,
-          cantidad,
-          precioCosto: stockOrigenes[0].precioCosto, // Usar el precioCosto del primer stock FIFO
-          costoTotal: stockOrigenes[0].precioCosto * cantidad,
-          fechaIngreso: new Date(),
-        },
-      });
+      // ── Fin transacción ─────────────────────────────────────────────────
+
+      transferenciaId = resultado.transferencia.id;
+      movimientosParaAuditoria = [
+        ...resultado.movimientosOrigen,
+        resultado.movimientoDestino,
+      ];
+
+      this.logger.log(
+        `Transferencia #${transferenciaId} realizada. ` +
+          `productoId=${productoId} cantidad=${cantidad} ` +
+          `origen=${sucursalOrigenId} destino=${sucursalDestinoId}`,
+      );
+
+      // AUDITORÍA — fuera de la tx
+      await this.movimientoStock.registrarMuchos(
+        movimientosParaAuditoria.map((m) => ({
+          stockId: m.stockId,
+          productoId: m.productoId,
+          tipoMovimiento: TipoMovimientoStock.TRANSFERENCIA,
+          cantidadAnterior: m.cantidadAnterior,
+          cantidadNueva: m.cantidadNueva,
+          usuarioId: usuarioEncargadoId,
+          sucursalId: m.sucursalId,
+          transferenciaId: transferenciaId,
+          descripcion: m.esOrigen
+            ? `Salida por transferencia a sucursal ${sucursalDestinoId}`
+            : `Entrada por transferencia desde sucursal ${sucursalOrigenId}`,
+          origenModulo: 'TransferenciaProductoService.transferirProducto',
+        })),
+      );
+
+      return { message: 'Transferencia realizada con éxito' };
+    } catch (error) {
+      this.logger.error(
+        `Error en transferencia: ${error?.message ?? error}`,
+        error?.stack,
+      );
+      if (error instanceof BadRequestException) throw error;
+      throw new InternalServerErrorException(
+        'Error al realizar la transferencia',
+      );
     }
-
-    // Registrar la transferencia en la tabla TransferenciaProducto
-    await this.prisma.transferenciaProducto.create({
-      data: {
-        productoId,
-        cantidad,
-        sucursalOrigenId,
-        sucursalDestinoId,
-        usuarioEncargadoId,
-        fechaTransferencia: new Date(),
-      },
-    });
-
-    return { message: 'Transferencia realizada con éxito' };
   }
+
+  // ─── READS / OTROS — sin cambios ─────────────────────────────────────────
 
   findAll() {
     return `This action returns all transferenciaProducto`;
@@ -113,10 +226,8 @@ export class TransferenciaProductoService {
 
   async findAllMytranslates(id: number) {
     try {
-      const translates = await this.prisma.transferenciaProducto.findMany({
-        where: {
-          sucursalOrigenId: id,
-        },
+      return await this.prisma.transferenciaProducto.findMany({
+        where: { sucursalOrigenId: id },
         include: {
           producto: true,
           usuarioEncargado: true,
@@ -124,10 +235,6 @@ export class TransferenciaProductoService {
           sucursalOrigen: true,
         },
       });
-
-      console.log(translates);
-
-      return translates;
     } catch (error) {
       console.log(error);
       throw new BadRequestException('Error al conseguir registros');
@@ -147,10 +254,12 @@ export class TransferenciaProductoService {
 
   async removeAll() {
     try {
-      const borrados = await this.prisma.transferenciaProducto.deleteMany({});
-      return borrados;
+      return await this.prisma.transferenciaProducto.deleteMany({});
     } catch (error) {
       console.log(error);
+      throw new InternalServerErrorException(
+        'Error al eliminar transferencias',
+      );
     }
   }
 }

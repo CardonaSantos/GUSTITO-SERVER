@@ -47,14 +47,6 @@ export class PriceRequestController {
     return this.priceRequestService.rejectRequesPrice(idSolicitud, idUser);
   }
 
-  // @Patch(':id')
-  // update(
-  //   @Param('id') id: string,
-  //   @Body() updatePriceRequestDto: UpdatePriceRequestDto,
-  // ) {
-  //   return this.priceRequestService.update(+id, updatePriceRequestDto);
-  // }
-
   @Delete('/delete-all')
   removeall() {
     return this.priceRequestService.allremove();

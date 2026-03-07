@@ -6,40 +6,20 @@ import {
 import { CreateAjusteStockDto } from './dto/create-ajuste-stock.dto';
 import { UpdateAjusteStockDto } from './dto/update-ajuste-stock.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { TipoAjuste } from '@prisma/client';
+import { TipoAjuste, TipoMovimientoStock } from '@prisma/client';
 import { UpdateAjusteStockEmpaqueDto } from './dto/update-ajust-stock-empaque.dto';
+import { MovimientoStockService } from 'src/registrar-movimiento/registrar-movimiento.service';
 
 @Injectable()
 export class AjusteStockService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly movimientoStock: MovimientoStockService, // ← inyectado
+  ) {}
 
   create(createAjusteStockDto: CreateAjusteStockDto) {
     return 'This action adds a new ajusteStock';
   }
-
-  // async editStock (){
-  //   try {
-  //     const nuevoRegistroCambio = await this.prisma.ajusteStock.create({
-  //       data: {
-
-  //       }
-  //     })
-  //   } catch (error) {
-
-  //   }
-  // }
-
-  // id               Int      @id @default(autoincrement())
-  // producto         Producto @relation(fields: [productoId], references: [id])
-  // productoId       Int
-  // stock            Stock?   @relation(fields: [stockId], references: [id]) // Relación opcional al stock
-  // stockId          Int?     // Campo opcional para identificar el stock modificado
-  // cantidadAjustada Int
-  // tipoAjuste       TipoAjuste
-  // fechaHora        DateTime @default(now())
-  // usuario          Usuario?  @relation(fields: [usuarioId], references: [id])
-  // usuarioId        Int?
-  // descripcion      String?  // Campo opcional para el motivo del ajuste
 
   findAll() {
     return `This action returns all ajusteStock`;
@@ -49,8 +29,12 @@ export class AjusteStockService {
     return `This action returns a #${id} ajusteStock`;
   }
 
+  // ==========================
+  // AJUSTE — PRODUCTO
+  // ==========================
   async update(id: number, updateAjusteStockDto: UpdateAjusteStockDto) {
     try {
+      // Leemos ANTES para tener cantidadAnterior
       const stockToUpdate = await this.prisma.stock.findUnique({
         where: { id },
       });
@@ -70,7 +54,7 @@ export class AjusteStockService {
         usuarioId,
       } = updateAjusteStockDto;
 
-      // Determinar el tipo de ajuste según la cantidad
+      // Determinar tipo de ajuste
       let tipoAjuste: TipoAjuste;
       if (cantidadAjustada > stockToUpdate.cantidad) {
         tipoAjuste = TipoAjuste.INCREMENTO;
@@ -80,6 +64,7 @@ export class AjusteStockService {
         tipoAjuste = TipoAjuste.CORRECCION;
       }
 
+      // 1) Actualizar stock
       const stockUpdated = await this.prisma.stock.update({
         where: { id },
         data: {
@@ -92,7 +77,8 @@ export class AjusteStockService {
         },
       });
 
-      await this.prisma.ajusteStock.create({
+      // 2) Crear registro de ajuste
+      const ajusteCreado = await this.prisma.ajusteStock.create({
         data: {
           productoId,
           stockId: stockUpdated.id,
@@ -102,6 +88,28 @@ export class AjusteStockService {
           usuarioId,
           descripcion: descripcion || 'Ajuste sin descripción',
         },
+      });
+
+      // 3) AUDITORÍA — después de todo, nunca dentro de una tx
+      // Mapeamos TipoAjuste → TipoMovimientoStock para consistencia
+      const tipoMovimiento =
+        tipoAjuste === TipoAjuste.INCREMENTO
+          ? TipoMovimientoStock.AJUSTE_MANUAL
+          : tipoAjuste === TipoAjuste.DECREMENTO
+            ? TipoMovimientoStock.AJUSTE_MANUAL
+            : TipoMovimientoStock.CORRECCION;
+
+      await this.movimientoStock.registrar({
+        stockId: stockUpdated.id,
+        productoId: productoId,
+        tipoMovimiento,
+        cantidadAnterior: stockToUpdate.cantidad, // valor real ANTES del update
+        cantidadNueva: cantidad, // valor que quedó en DB
+        usuarioId: usuarioId,
+        sucursalId: stockToUpdate.sucursalId,
+        ajusteStockId: ajusteCreado.id,
+        descripcion: descripcion || 'Ajuste sin descripción',
+        origenModulo: 'AjusteStockService.update',
       });
 
       return {
@@ -115,11 +123,15 @@ export class AjusteStockService {
     }
   }
 
+  // ==========================
+  // AJUSTE — EMPAQUE
+  // ==========================
   async updateEmpaqueStock(
     id: number,
     updateAjusteStockDto: UpdateAjusteStockEmpaqueDto,
   ) {
     try {
+      // Leemos ANTES para tener cantidadAnterior
       const stockToUpdate = await this.prisma.stock.findUnique({
         where: { id },
       });
@@ -139,7 +151,7 @@ export class AjusteStockService {
         empaqueId,
       } = updateAjusteStockDto;
 
-      // Determinar el tipo de ajuste según la cantidad
+      // Determinar tipo de ajuste
       let tipoAjuste: TipoAjuste;
       if (cantidadAjustada > stockToUpdate.cantidad) {
         tipoAjuste = TipoAjuste.INCREMENTO;
@@ -149,6 +161,7 @@ export class AjusteStockService {
         tipoAjuste = TipoAjuste.CORRECCION;
       }
 
+      // 1) Actualizar stock
       const stockUpdated = await this.prisma.stock.update({
         where: { id },
         data: {
@@ -161,7 +174,8 @@ export class AjusteStockService {
         },
       });
 
-      await this.prisma.ajusteStock.create({
+      // 2) Crear registro de ajuste
+      const ajusteCreado = await this.prisma.ajusteStock.create({
         data: {
           empaqueId,
           stockId: stockUpdated.id,
@@ -171,6 +185,27 @@ export class AjusteStockService {
           usuarioId,
           descripcion: descripcion || 'Ajuste sin descripción',
         },
+      });
+
+      // 3) AUDITORÍA
+      const tipoMovimiento =
+        tipoAjuste === TipoAjuste.INCREMENTO
+          ? TipoMovimientoStock.AJUSTE_MANUAL
+          : tipoAjuste === TipoAjuste.DECREMENTO
+            ? TipoMovimientoStock.AJUSTE_MANUAL
+            : TipoMovimientoStock.CORRECCION;
+
+      await this.movimientoStock.registrar({
+        stockId: stockUpdated.id,
+        empaqueId: empaqueId,
+        tipoMovimiento,
+        cantidadAnterior: stockToUpdate.cantidad,
+        cantidadNueva: cantidad,
+        usuarioId: usuarioId,
+        sucursalId: stockToUpdate.sucursalId,
+        ajusteStockId: ajusteCreado.id,
+        descripcion: descripcion || 'Ajuste sin descripción',
+        origenModulo: 'AjusteStockService.updateEmpaqueStock',
       });
 
       return {

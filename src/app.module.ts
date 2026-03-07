@@ -38,6 +38,7 @@ import { MetasModule } from './metas/metas.module';
 // import { EmpresaModule } from './crm/empresa/empresa.module';
 import { EmpresaModule } from './CRM/empresa/empresa.module';
 import { EmpaqueModule } from './empaque/empaque.module';
+import { MovimientoStockModule } from './registrar-movimiento/registrar-movimiento.module';
 
 @Module({
   imports: [
@@ -80,6 +81,7 @@ import { EmpaqueModule } from './empaque/empaque.module';
     MetasModule,
     EmpresaModule,
     EmpaqueModule,
+    MovimientoStockModule,
   ],
   controllers: [AppController],
   providers: [AppService],

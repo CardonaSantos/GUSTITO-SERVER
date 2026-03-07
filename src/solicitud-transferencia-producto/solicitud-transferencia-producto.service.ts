@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   InternalServerErrorException,
+  Logger,
 } from '@nestjs/common';
 import { CreateSolicitudTransferenciaProductoDto } from './dto/create-solicitud-transferencia-producto.dto';
 import { UpdateSolicitudTransferenciaProductoDto } from './dto/update-solicitud-transferencia-producto.dto';
@@ -9,10 +10,13 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { TransferenciaProductoService } from 'src/transferencia-producto/transferencia-producto.service';
 import { NotificationService } from 'src/notification/notification.service';
 import { WebsocketGateway } from 'src/web-sockets/websocket.gateway';
-import { CreateTransferenciaProductoDto } from 'src/transferencia-producto/dto/create-transferencia-producto.dto';
 
 @Injectable()
 export class SolicitudTransferenciaProductoService {
+  private readonly logger = new Logger(
+    SolicitudTransferenciaProductoService.name,
+  );
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly transferenciaProductoService: TransferenciaProductoService,
@@ -20,11 +24,14 @@ export class SolicitudTransferenciaProductoService {
     private readonly webSocketGateway: WebsocketGateway,
   ) {}
 
+  // ─── CREAR SOLICITUD ──────────────────────────────────────────────────────
+  // Sin cambios de lógica — solo notificaciones, no toca stock
+
   async create(
     createSolicitudTransferenciaProductoDto: CreateSolicitudTransferenciaProductoDto,
   ) {
     try {
-      const nuevaSolicitudTransferencia =
+      const nuevaSolicitud =
         await this.prisma.solicitudTransferenciaProducto.create({
           data: {
             cantidad: createSolicitudTransferenciaProductoDto.cantidad,
@@ -39,88 +46,62 @@ export class SolicitudTransferenciaProductoService {
           },
         });
 
-      const admins = await this.prisma.usuario.findMany({
-        where: { rol: 'ADMIN' },
-      });
+      const [admins, user, product, sucursalOrigen, sucursalDestino] =
+        await Promise.all([
+          this.prisma.usuario.findMany({ where: { rol: 'ADMIN' } }),
+          this.prisma.usuario.findUnique({
+            where: {
+              id: createSolicitudTransferenciaProductoDto.usuarioSolicitanteId,
+            },
+          }),
+          this.prisma.producto.findUnique({
+            where: { id: createSolicitudTransferenciaProductoDto.productoId },
+          }),
+          this.prisma.sucursal.findUnique({
+            where: {
+              id: createSolicitudTransferenciaProductoDto.sucursalOrigenId,
+            },
+          }),
+          this.prisma.sucursal.findUnique({
+            where: {
+              id: createSolicitudTransferenciaProductoDto.sucursalDestinoId,
+            },
+          }),
+        ]);
 
-      const user = await this.prisma.usuario.findUnique({
-        where: {
-          id: createSolicitudTransferenciaProductoDto.usuarioSolicitanteId,
-        },
-      });
-      const product = await this.prisma.producto.findUnique({
-        where: {
-          id: createSolicitudTransferenciaProductoDto.productoId,
-        },
-      });
+      const mensaje =
+        `El usuario ${user.nombre} ha solicitado una transferencia del producto ` +
+        `"${product.nombre}" desde "${sucursalOrigen.nombre}" hacia "${sucursalDestino.nombre}" ` +
+        `de un total de ${createSolicitudTransferenciaProductoDto.cantidad} unidades.`;
 
-      const sucursalOrigen = await this.prisma.sucursal.findUnique({
-        where: {
-          id: createSolicitudTransferenciaProductoDto.sucursalOrigenId,
-        },
-      });
-
-      const sucursalDestino = await this.prisma.sucursal.findUnique({
-        where: {
-          id: createSolicitudTransferenciaProductoDto.sucursalDestinoId,
-        },
-      });
-
-      // const mensaje = `El usuario ${user.nombre} ha solicitdado una transferncia para el producto ${product.nombre} de la sucursal ${sucursalOrigen.nombre} a ${sucursalDestino.nombre}`;
-      // const mensaje = `El usuario ${user.nombre} ha solicitado una transferencia del producto "${product.nombre}" desde la sucursal "${sucursalOrigen.nombre}" hacia la sucursal "${sucursalDestino.nombre} de ${createSolicitudTransferenciaProductoDto.cantidad} unidades".`;
-      const mensaje = `El usuario ${user.nombre} ha solicitado una transferencia del producto "${product.nombre}" desde la sucursal "${sucursalOrigen.nombre}" hacia la sucursal "${sucursalDestino.nombre}" de un total de ${createSolicitudTransferenciaProductoDto.cantidad} unidades.`;
-
-      const solicitudTranferenciaDetalles =
+      const solicitudDetalles =
         await this.prisma.solicitudTransferenciaProducto.findUnique({
-          where: {
-            id: nuevaSolicitudTransferencia.id,
-          },
+          where: { id: nuevaSolicitud.id },
           include: {
-            producto: {
-              select: {
-                nombre: true,
-              },
-            },
-            sucursalOrigen: {
-              select: {
-                nombre: true,
-              },
-            },
-            sucursalDestino: {
-              select: {
-                nombre: true,
-              },
-            },
-            usuarioSolicitante: {
-              select: {
-                nombre: true,
-                rol: true,
-              },
-            },
+            producto: { select: { nombre: true } },
+            sucursalOrigen: { select: { nombre: true } },
+            sucursalDestino: { select: { nombre: true } },
+            usuarioSolicitante: { select: { nombre: true, rol: true } },
           },
         });
 
-      // Crear la notificación en la base de datos y emitir a cada administrador
       await Promise.all(
         admins.map(async (admin) => {
-          // Crear y emitir notificación
           await this.notificationService.create(
             mensaje,
             createSolicitudTransferenciaProductoDto.usuarioSolicitanteId,
             [admin.id],
             'TRANSFERENCIA',
-            solicitudTranferenciaDetalles.id,
+            solicitudDetalles.id,
           );
-
-          // Emitir la solicitud de transferencia directamente a cada admin conectado
           this.webSocketGateway.handleEnviarSolicitudTransferencia(
-            solicitudTranferenciaDetalles,
+            solicitudDetalles,
             admin.id,
           );
         }),
       );
 
-      return nuevaSolicitudTransferencia;
+      return nuevaSolicitud;
     } catch (error) {
       console.log(error);
       throw new BadRequestException(
@@ -129,48 +110,14 @@ export class SolicitudTransferenciaProductoService {
     }
   }
 
-  // async createTransferencia(idSolicitudTransferencia: number, userID: number) {
-  //   try {
-  //     // Encontrar la solicitud de transferencia
-  //     const solicitudTransferencia =
-  //       await this.prisma.solicitudTransferenciaProducto.findUnique({
-  //         where: { id: idSolicitudTransferencia },
-  //       });
-
-  //     if (!solicitudTransferencia) {
-  //       throw new Error('Solicitud de transferencia no encontrada');
-  //     }
-
-  //     // Extraer datos necesarios para la transferencia
-  //     const dto: CreateTransferenciaProductoDto = {
-  //       productoId: solicitudTransferencia.productoId,
-  //       cantidad: solicitudTransferencia.cantidad,
-  //       sucursalOrigenId: solicitudTransferencia.sucursalOrigenId,
-  //       sucursalDestinoId: solicitudTransferencia.sucursalDestinoId,
-  //       usuarioEncargadoId: userID,
-  //     };
-
-  //     // Ejecutar la transferencia
-  //     const transferencia = await this.transferirProducto(dto);
-
-  //     // Eliminar la solicitud de transferencia después de completar la transferencia
-  //     await this.prisma.solicitudTransferenciaProducto.delete({
-  //       where: { id: idSolicitudTransferencia },
-  //     });
-
-  //     return {
-  //       message: 'Transferencia realizada y solicitud eliminada con éxito',
-  //       transferencia,
-  //     };
-  //   } catch (error) {
-  //     throw new Error(`Error al aceptar la transferencia: ${error.message}`);
-  //   }
-  // }
+  // ─── APROBAR SOLICITUD ────────────────────────────────────────────────────
+  // 🔴 FIX: antes llamaba this.transferirProducto() — su propio método duplicado
+  // sin transacción. Ahora delega a this.transferenciaProductoService.transferirProducto()
+  // que ya tiene: $transaction + auditoría de MovimientoStock incluida.
 
   async createTransferencia(idSolicitudTransferencia: number, userID: number) {
     try {
-      // Encontrar la solicitud de transferencia
-      const solicitudTransferencia =
+      const solicitud =
         await this.prisma.solicitudTransferenciaProducto.findUnique({
           where: { id: idSolicitudTransferencia },
           include: {
@@ -181,42 +128,43 @@ export class SolicitudTransferenciaProductoService {
           },
         });
 
-      if (!solicitudTransferencia) {
-        throw new Error('Solicitud de transferencia no encontrada');
+      if (!solicitud) {
+        throw new BadRequestException(
+          'Solicitud de transferencia no encontrada',
+        );
       }
 
-      // Extraer datos necesarios para la transferencia
-      const dto: CreateTransferenciaProductoDto = {
-        productoId: solicitudTransferencia.productoId,
-        cantidad: solicitudTransferencia.cantidad,
-        sucursalOrigenId: solicitudTransferencia.sucursalOrigenId,
-        sucursalDestinoId: solicitudTransferencia.sucursalDestinoId,
-        usuarioEncargadoId: userID,
-      };
+      // ✅ Delega al servicio ya corregido — con $transaction y auditoría incluida
+      const transferencia =
+        await this.transferenciaProductoService.transferirProducto({
+          productoId: solicitud.productoId,
+          cantidad: solicitud.cantidad,
+          sucursalOrigenId: solicitud.sucursalOrigenId,
+          sucursalDestinoId: solicitud.sucursalDestinoId,
+          usuarioEncargadoId: userID,
+        });
 
-      // Ejecutar la transferencia
-      const transferencia = await this.transferirProducto(dto);
+      // Notificar al solicitante
       const product = await this.prisma.producto.findUnique({
-        where: {
-          id: solicitudTransferencia.productoId,
-        },
+        where: { id: solicitud.productoId },
       });
 
-      // Crear la notificación para el usuario solicitante
-      const mensaje = `Un administrador aceptó tu solicitud de transferencia para el producto "${product.nombre}".`;
-
       await this.notificationService.createOneNotification(
-        mensaje,
+        `Un administrador aceptó tu solicitud de transferencia para el producto "${product.nombre}".`,
         userID,
-        solicitudTransferencia.usuarioSolicitante.id,
+        solicitud.usuarioSolicitante.id,
         'TRANSFERENCIA',
         idSolicitudTransferencia,
       );
 
-      // Eliminar la solicitud de transferencia después de completar la transferencia
+      // Eliminar la solicitud aprobada
       await this.prisma.solicitudTransferenciaProducto.delete({
         where: { id: idSolicitudTransferencia },
       });
+
+      this.logger.log(
+        `Solicitud #${idSolicitudTransferencia} aprobada por usuario ${userID}`,
+      );
 
       return {
         message:
@@ -224,166 +172,67 @@ export class SolicitudTransferenciaProductoService {
         transferencia,
       };
     } catch (error) {
-      throw new Error(`Error al aceptar la transferencia: ${error.message}`);
+      this.logger.error(
+        `Error al aprobar transferencia: ${error?.message ?? error}`,
+        error?.stack,
+      );
+      if (error instanceof BadRequestException) throw error;
+      throw new InternalServerErrorException(
+        `Error al aceptar la transferencia: ${error.message}`,
+      );
     }
   }
+
+  // ─── RECHAZAR SOLICITUD ───────────────────────────────────────────────────
+  // Sin cambios — no toca stock
 
   async rechazarTransferencia(
     idSolicitudTransferencia: number,
     userID: number,
   ) {
     try {
-      const solicituDelete =
+      const solicitudEliminada =
         await this.prisma.solicitudTransferenciaProducto.delete({
-          where: {
-            id: idSolicitudTransferencia,
-          },
+          where: { id: idSolicitudTransferencia },
         });
 
       const product = await this.prisma.producto.findUnique({
-        where: {
-          id: solicituDelete.productoId,
-        },
+        where: { id: solicitudEliminada.productoId },
       });
 
-      // CREAR UNA NOTIFICACION Y ENVIARLA CON EL METODO
       await this.notificationService.createOneNotification(
         `Un administrador rechazó tu solicitud de transferencia para el producto "${product.nombre}"`,
         userID,
-        solicituDelete.usuarioSolicitanteId,
+        solicitudEliminada.usuarioSolicitanteId,
         'TRANSFERENCIA',
-        // solicitudTranferenciaDetalles.id,
       );
     } catch (error) {
-      throw new Error(`Error al aceptar la transferencia: ${error.message}`);
+      this.logger.error(
+        `Error al rechazar transferencia: ${error?.message ?? error}`,
+        error?.stack,
+      );
+      throw new InternalServerErrorException(
+        `Error al rechazar la transferencia: ${error.message}`,
+      );
     }
   }
 
-  //=====================================================================>
-
-  async transferirProducto(dto: CreateTransferenciaProductoDto) {
-    const {
-      productoId,
-      cantidad,
-      sucursalOrigenId,
-      sucursalDestinoId,
-      usuarioEncargadoId,
-    } = dto;
-
-    // Verificar que hay suficiente stock en la sucursal de origen sumando todos los registros disponibles
-    const stockOrigenes = await this.prisma.stock.findMany({
-      where: { productoId, sucursalId: sucursalOrigenId },
-      orderBy: { fechaIngreso: 'asc' }, // Ordenar por fechaIngreso para aplicar FIFO
-    });
-
-    // Calcular la cantidad total disponible en la sucursal de origen
-    const cantidadTotalStockOrigen = stockOrigenes.reduce(
-      (total, stock) => total + stock.cantidad,
-      0,
-    );
-
-    if (cantidadTotalStockOrigen < cantidad) {
-      throw new Error('Stock insuficiente en la sucursal de origen');
-    }
-
-    let cantidadRestante = cantidad;
-
-    // FIFO
-    for (const stock of stockOrigenes) {
-      if (cantidadRestante === 0) break;
-
-      if (stock.cantidad <= cantidadRestante) {
-        // Si el stock actual es menor o igual a la cantidad requerida, restar todo el stock
-        await this.prisma.stock.update({
-          where: { id: stock.id },
-          data: { cantidad: 0 }, // Consumir todo este registro de stock
-        });
-        cantidadRestante -= stock.cantidad;
-      } else {
-        // Si el stock actual es mayor a la cantidad requerida, restar solo lo necesario
-        await this.prisma.stock.update({
-          where: { id: stock.id },
-          data: { cantidad: stock.cantidad - cantidadRestante },
-        });
-        cantidadRestante = 0; // Ya no queda más cantidad por transferir
-      }
-    }
-
-    // Buscar o crear el stock en la sucursal de destino
-    const stockDestino = await this.prisma.stock.findFirst({
-      where: { productoId, sucursalId: sucursalDestinoId },
-    });
-
-    if (stockDestino) {
-      // Si ya existe el stock del producto en la sucursal destino, sumamos la cantidad
-      await this.prisma.stock.update({
-        where: { id: stockDestino.id },
-        data: { cantidad: stockDestino.cantidad + cantidad },
-      });
-    } else {
-      // Si no existe, creamos un nuevo registro de stock en la sucursal destino
-      await this.prisma.stock.create({
-        data: {
-          productoId,
-          sucursalId: sucursalDestinoId,
-          cantidad,
-          precioCosto: stockOrigenes[0].precioCosto, // Usar el precioCosto del primer stock FIFO
-          costoTotal: stockOrigenes[0].precioCosto * cantidad,
-          fechaIngreso: new Date(),
-        },
-      });
-    }
-
-    // Registrar la transferencia en la tabla TransferenciaProducto
-    await this.prisma.transferenciaProducto.create({
-      data: {
-        productoId,
-        cantidad,
-        sucursalOrigenId,
-        sucursalDestinoId,
-        usuarioEncargadoId,
-        fechaTransferencia: new Date(),
-      },
-    });
-
-    return { message: 'Transferencia realizada con éxito' };
-  }
+  // ─── READS ────────────────────────────────────────────────────────────────
 
   async findAll() {
     try {
-      const solicitudesTransferencia =
-        await this.prisma.solicitudTransferenciaProducto.findMany({
-          include: {
-            producto: {
-              select: {
-                nombre: true,
-              },
-            },
-            sucursalOrigen: {
-              select: {
-                nombre: true,
-              },
-            },
-            sucursalDestino: {
-              select: {
-                nombre: true,
-              },
-            },
-            usuarioSolicitante: {
-              select: {
-                nombre: true,
-                rol: true,
-              },
-            },
-          },
-        });
-
-      return solicitudesTransferencia;
+      return await this.prisma.solicitudTransferenciaProducto.findMany({
+        include: {
+          producto: { select: { nombre: true } },
+          sucursalOrigen: { select: { nombre: true } },
+          sucursalDestino: { select: { nombre: true } },
+          usuarioSolicitante: { select: { nombre: true, rol: true } },
+        },
+      });
     } catch (error) {
       console.log(error);
-
       throw new InternalServerErrorException(
-        'Error al encontrar las solicitudes de trasnferencia',
+        'Error al encontrar las solicitudes de transferencia',
       );
     }
   }
