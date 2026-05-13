@@ -1,7 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Prisma, TipoMovimientoStock } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { TipoMovimientoStock } from '@prisma/client';
 import { RegistrarMovimientoDto } from './interfaces';
+
+type DbClient = Prisma.TransactionClient | PrismaService;
 
 @Injectable()
 export class MovimientoStockService {
@@ -9,16 +11,23 @@ export class MovimientoStockService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  /**
-   * Registra un movimiento de stock en la tabla de auditoría.
-   * Este método nunca lanza — si falla, loguea el error silenciosamente
-   * para no interrumpir el flujo principal de negocio.
-   */
-  async registrar(dto: RegistrarMovimientoDto): Promise<void> {
-    const delta = dto.cantidadNueva - dto.cantidadAnterior;
+  private getClient(tx?: Prisma.TransactionClient): DbClient {
+    return tx ?? this.prisma;
+  }
+
+  async registrar(
+    dto: RegistrarMovimientoDto,
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    const client = this.getClient(tx);
+    const delta = Number(dto.cantidadNueva) - Number(dto.cantidadAnterior);
+
+    this.logger.debug(
+      `[MovimientoStock][payload] ${JSON.stringify(dto, null, 2)}`,
+    );
 
     try {
-      await this.prisma.movimientoStock.create({
+      const created = await client.movimientoStock.create({
         data: {
           stockId: dto.stockId ?? null,
           productoId: dto.productoId ?? null,
@@ -39,29 +48,29 @@ export class MovimientoStockService {
       });
 
       this.logger.debug(
-        `[${dto.origenModulo ?? 'N/A'}] Movimiento registrado — ` +
-          `tipo=${dto.tipoMovimiento} stockId=${dto.stockId} ` +
-          `delta=${delta > 0 ? '+' : ''}${delta}`,
+        `[MovimientoStock][ok] id=${created.id} tipo=${dto.tipoMovimiento} delta=${delta}`,
       );
     } catch (error) {
-      // NUNCA relanzamos: la auditoría no debe romper el flujo principal
       this.logger.error(
-        `Error al registrar movimiento de stock: ${error?.message ?? error}`,
-        error?.stack,
+        `[MovimientoStock][error] ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
       );
+      throw error;
     }
   }
 
-  /**
-   * Variante para registrar múltiples movimientos de una sola vez
-   * (ej: al crear stock en lote con createMany).
-   * Usa Promise.allSettled para que un fallo individual no cancele los demás.
-   */
-  async registrarMuchos(dtos: RegistrarMovimientoDto[]): Promise<void> {
-    await Promise.allSettled(dtos.map((dto) => this.registrar(dto)));
-  }
+  async registrarMuchos(
+    dtos: RegistrarMovimientoDto[],
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    this.logger.debug(
+      `[MovimientoStock][registrarMuchos] cantidad=${dtos.length}`,
+    );
 
-  // ─── CONSULTAS ────────────────────────────────────────────────────────────
+    for (const dto of dtos) {
+      await this.registrar(dto, tx);
+    }
+  }
 
   async findByProducto(productoId: number) {
     return this.prisma.movimientoStock.findMany({
