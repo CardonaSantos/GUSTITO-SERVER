@@ -317,44 +317,54 @@ export class VentaService {
       monto,
     } = createVentaDto;
 
+    this.logger.log(
+      `[Venta][create][payload] ${JSON.stringify(createVentaDto, null, 2)}`,
+    );
+
+    // ─────────────────────────────────────────
+    // 0) Validaciones base
+    // ─────────────────────────────────────────
     if (!sucursalId || !usuarioId) {
       throw new BadRequestException(
         'sucursalId y usuarioId son requeridos para crear una venta',
       );
     }
-    if (!productos || productos.length === 0) {
+
+    if (!Array.isArray(productos) || productos.length === 0) {
       throw new BadRequestException(
         'Debe enviar al menos un producto para crear una venta',
       );
     }
 
+    const metodoPagoNormalizado = metodoPago as MetodoPago;
+    const esPagoExentoDeCaja =
+      metodoPagoNormalizado === MetodoPago.TARJETA ||
+      metodoPagoNormalizado === MetodoPago.TRANSFERENCIA;
+
     this.logger.log(
-      `Intentando crear venta. sucursalId=${sucursalId}, usuarioId=${usuarioId}, metodoPago=${metodoPago}`,
+      `[Venta][create][contexto] sucursalId=${sucursalId} usuarioId=${usuarioId} metodoPago=${metodoPagoNormalizado} exentoCaja=${esPagoExentoDeCaja}`,
     );
 
     try {
-      // stockUpdates se saca de la transacción para usarlo en la auditoría
-      let stockUpdatesParaAuditoria: StockUpdate[] = [];
-
       const venta = await this.prisma.$transaction(async (tx) => {
-        // 0) Caja
-        const esPagoExentoDeCaja =
-          metodoPago === MetodoPago.TARJETA ||
-          metodoPago === MetodoPago.TRANSFERENCIA;
+        this.logger.log(
+          `[Venta][tx:start] sucursalId=${sucursalId} usuarioId=${usuarioId}`,
+        );
 
-        let cajaAbierta: { id: number } | null = null;
+        // ─────────────────────────────────────
+        // 1) Caja abierta
+        // ─────────────────────────────────────
+        const cajaAbierta = esPagoExentoDeCaja
+          ? await this.getCajaAbierta(tx, sucursalId, usuarioId)
+          : await this.getCajaAbiertaOrThrow(tx, sucursalId, usuarioId);
 
-        if (esPagoExentoDeCaja) {
-          cajaAbierta = await this.getCajaAbierta(tx, sucursalId, usuarioId);
-        } else {
-          cajaAbierta = await this.getCajaAbiertaOrThrow(
-            tx,
-            sucursalId,
-            usuarioId,
-          );
-        }
+        this.logger.log(
+          `[Venta][tx:caja] ${JSON.stringify(cajaAbierta, null, 2)}`,
+        );
 
-        // 1) Cliente
+        // ─────────────────────────────────────
+        // 2) Cliente
+        // ─────────────────────────────────────
         const clienteConnect = await this.getClienteConnect(tx, {
           clienteId,
           nombre,
@@ -364,7 +374,13 @@ export class VentaService {
           iPInternet,
         });
 
-        // 2) Preparar productos + stock (cantidadAnterior ya viene aquí)
+        this.logger.log(
+          `[Venta][tx:cliente] ${JSON.stringify(clienteConnect, null, 2)}`,
+        );
+
+        // ─────────────────────────────────────
+        // 3) Preparar productos y stock
+        // ─────────────────────────────────────
         const { productosFinal, stockUpdates } =
           await this.prepararProductosYStock(
             tx,
@@ -373,21 +389,31 @@ export class VentaService {
             sucursalId,
           );
 
-        // Guardamos referencia para usarla FUERA de la tx en la auditoría
-        stockUpdatesParaAuditoria = stockUpdates;
+        this.logger.log(
+          `[Venta][tx:stock] productosFinal=${productosFinal.length} stockUpdates=${stockUpdates.length}`,
+        );
 
-        // 3) Aplicar descuento de stock
+        // ─────────────────────────────────────
+        // 4) Aplicar descuento de stock
+        // ─────────────────────────────────────
         await this.aplicarStock(tx, stockUpdates);
 
-        // 4) Total
+        // ─────────────────────────────────────
+        // 5) Total de venta
+        // ─────────────────────────────────────
         const totalVenta = this.calcularTotalVenta(productosFinal);
-        if (monto && monto !== totalVenta) {
+
+        if (monto !== undefined && Number(monto) !== totalVenta) {
           this.logger.warn(
-            `Monto enviado (${monto}) difiere del calculado (${totalVenta}). Se usará el calculado.`,
+            `[Venta][tx:monto] monto_enviado=${monto} monto_calculado=${totalVenta}. Se usará el calculado.`,
           );
         }
 
-        // 5) Crear venta
+        this.logger.log(`[Venta][tx:total] totalVenta=${totalVenta}`);
+
+        // ─────────────────────────────────────
+        // 6) Crear venta
+        // ─────────────────────────────────────
         const ventaCreada = await tx.venta.create({
           data: {
             usuario: { connect: { id: usuarioId } },
@@ -409,7 +435,13 @@ export class VentaService {
           },
         });
 
-        // 6) Saldo sucursal
+        this.logger.log(
+          `[Venta][tx:venta_creada] ventaId=${ventaCreada.id} totalVenta=${ventaCreada.totalVenta}`,
+        );
+
+        // ─────────────────────────────────────
+        // 7) Saldo de sucursal
+        // ─────────────────────────────────────
         await tx.sucursalSaldo.update({
           where: { sucursalId },
           data: {
@@ -418,13 +450,21 @@ export class VentaService {
           },
         });
 
-        // 7) Precios especiales
+        this.logger.log(
+          `[Venta][tx:sucursal_saldo] sucursalId=${sucursalId} increment=${totalVenta}`,
+        );
+
+        // ─────────────────────────────────────
+        // 8) Precios especiales
+        // ─────────────────────────────────────
         await this.marcarPreciosEspeciales(tx, productosFinal);
 
-        // 8) Pago
+        // ─────────────────────────────────────
+        // 9) Pago
+        // ─────────────────────────────────────
         const pago = await tx.pago.create({
           data: {
-            metodoPago,
+            metodoPago: metodoPagoNormalizado,
             monto: ventaCreada.totalVenta,
             venta: { connect: { id: ventaCreada.id } },
           },
@@ -435,16 +475,15 @@ export class VentaService {
           data: { metodoPago: { connect: { id: pago.id } } },
         });
 
-        return ventaCreada;
-      });
-      // ── Fin transacción ───────────────────────────────────────────────────
+        this.logger.log(
+          `[Venta][tx:pago] pagoId=${pago.id} ventaId=${ventaCreada.id}`,
+        );
 
-      this.logger.log(`Venta creada correctamente. ventaId=${venta.id}`);
-
-      // AUDITORÍA — fuera de la tx, con los datos capturados durante prepararProductosYStock
-      await this.movimientoStock.registrarMuchos(
-        stockUpdatesParaAuditoria
-          .filter((s) => s.cantidadAnterior !== s.cantidad) // ← solo delta ≠ 0
+        // ─────────────────────────────────────
+        // 10) Auditoría de stock dentro de la misma transacción
+        // ─────────────────────────────────────
+        const movimientosAuditoria = stockUpdates
+          .filter((s) => s.cantidadAnterior !== s.cantidad)
           .map((s) => ({
             stockId: s.id,
             productoId: s.productoId,
@@ -454,17 +493,33 @@ export class VentaService {
             cantidadNueva: s.cantidad,
             usuarioId,
             sucursalId: s.sucursalId,
-            ventaId: venta.id,
+            ventaId: ventaCreada.id,
             origenModulo: 'VentaService.create',
-          })),
-      );
+          }));
 
+        this.logger.log(
+          `[Venta][tx:auditoria_stock] movimientos=${movimientosAuditoria.length}`,
+        );
+
+        if (movimientosAuditoria.length) {
+          await this.movimientoStock.registrarMuchos(movimientosAuditoria, tx);
+        }
+
+        this.logger.log(
+          `[Venta][tx:end] ventaId=${ventaCreada.id} completada correctamente`,
+        );
+
+        return ventaCreada;
+      });
+
+      this.logger.log(`[Venta][create][ok] ventaId=${venta.id}`);
       return venta;
     } catch (error) {
       this.logger.error(
-        `Error al crear la venta: ${error.message}`,
-        error.stack,
+        `[Venta][create][error] ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
       );
+
       if (error instanceof BadRequestException) throw error;
       throw new InternalServerErrorException('Error al crear la venta');
     }
